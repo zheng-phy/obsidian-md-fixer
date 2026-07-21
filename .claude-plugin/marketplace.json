@@ -1,0 +1,20 @@
+{
+  "name": "obsidian-md-fixer",
+  "owner": {
+    "name": "zheng-phy",
+    "url": "https://github.com/zheng-phy"
+  },
+  "metadata": {
+    "description": "Fix Markdown converted from PDF/Word so tables, formulas, and images render correctly in Obsidian.",
+    "version": "1.1.0"
+  },
+  "plugins": [
+    {
+      "name": "obsidian-md-fixer",
+      "source": "./",
+      "description": "Deterministic fixers for converted Markdown: HTML tables to Markdown, chemical-formula subscripts, math-delimiter repair, image path fixing, and a line-numbered verifier report.",
+      "category": "documents",
+      "tags": ["obsidian", "markdown", "mineru", "table", "latex", "formula", "image"]
+    }
+  ]
+}

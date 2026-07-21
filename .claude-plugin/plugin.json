@@ -1,0 +1,13 @@
+{
+  "name": "obsidian-md-fixer",
+  "version": "1.1.0",
+  "description": "Fix Markdown converted from PDF/Word (by MinerU, pandoc, Marker, any converter) so tables, formulas, and images render correctly in Obsidian.",
+  "author": {
+    "name": "zheng-phy",
+    "url": "https://github.com/zheng-phy"
+  },
+  "homepage": "https://github.com/zheng-phy/obsidian-md-fixer",
+  "repository": "https://github.com/zheng-phy/obsidian-md-fixer",
+  "license": "MIT",
+  "keywords": ["obsidian", "markdown", "mineru", "table", "latex", "formula", "image", "fixer", "claude-code"]
+}
