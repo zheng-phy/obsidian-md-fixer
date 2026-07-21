@@ -27,15 +27,23 @@ def _check_dollar_balance(text: str) -> list[str]:
     return problems
 
 
-def verify(md_path: Path, fixer_ids: list | None = None) -> list[str]:
-    """Aggregate selected fixers' detect() into string issues (empty = pass)."""
+def verify_issues(md_path: Path, fixer_ids: list | None = None) -> list:
+    """Aggregate selected fixers' detect() into structured Issue objects."""
+    from scripts.fixers.base import Issue
+
     md_path = Path(md_path)
     text = md_path.read_text(encoding="utf-8")
     chosen = select(fixer_ids) if fixer_ids else all_fixers()
 
-    problems: list[str] = []
+    issues: list = []
     for fixer in chosen:
         target = md_path if fixer.file_based else text
-        problems += [str(issue) for issue in fixer.detect(target)]
-    problems += _check_dollar_balance(text)
-    return problems
+        issues += fixer.detect(target)
+    for msg in _check_dollar_balance(text):
+        issues.append(Issue("verifier", 0, msg))
+    return issues
+
+
+def verify(md_path: Path, fixer_ids: list | None = None) -> list[str]:
+    """Aggregate selected fixers' detect() into string issues (empty = pass)."""
+    return [str(issue) for issue in verify_issues(md_path, fixer_ids)]

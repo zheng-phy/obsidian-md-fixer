@@ -27,6 +27,35 @@ def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None) -> list:
     return [f.id for f in select(ids)]
 
 
+_COLLAPSE_THRESHOLD = 15
+
+
+def _format_issues(issues: list) -> list:
+    """Format Issue objects for display; collapse a flooding fixer into a summary.
+
+    Any single fixer producing more than _COLLAPSE_THRESHOLD issues is folded
+    into one summary line (with a --skip hint) plus its first few examples, so a
+    handful of real issues are not drowned out by a misfiring fixer.
+    """
+    from collections import defaultdict
+
+    by_fixer: dict = defaultdict(list)
+    for issue in issues:
+        by_fixer[issue.fixer].append(issue)
+
+    out: list = []
+    for fixer, group in by_fixer.items():
+        if len(group) > _COLLAPSE_THRESHOLD:
+            out.append(
+                f"[{fixer}] {len(group)} issues (showing 3) — "
+                f"if these are mis-fires, consider --skip {fixer}"
+            )
+            out += [str(i) for i in group[:3]]
+        else:
+            out += [str(i) for i in group]
+    return out
+
+
 def process_markdown(md_path: Path, images_source_dir: Path | None, fixer_ids: list) -> list:
     """Run selected fixers in default order, then aggregate detect(). Returns problems."""
     md_path = Path(md_path)
@@ -43,7 +72,7 @@ def process_markdown(md_path: Path, images_source_dir: Path | None, fixer_ids: l
             src = images_source_dir if images_source_dir is not None else md_path.parent / "images"
             fixer.run(md_path, src)
 
-    return verifier.verify(md_path, fixer_ids)
+    return verifier.verify_issues(md_path, fixer_ids)
 
 
 def _run_fix_mode(input_path: Path, in_place: bool, fixer_ids: list, images_dir: Path | None) -> tuple:
@@ -86,10 +115,10 @@ def main(argv=None) -> int:
     fixer_ids = _resolve_fixer_ids(args.fixers, args.skip)
 
     if args.verify:
-        problems = verifier.verify(args.input, fixer_ids)
+        problems = verifier.verify_issues(args.input, fixer_ids)
         if problems:
             print("Verification warnings:", file=sys.stderr)
-            for problem in problems:
+            for problem in _format_issues(problems):
                 print(f"  - {problem}", file=sys.stderr)
             return 2
         print(f"Clean: {args.input}")
@@ -100,7 +129,7 @@ def main(argv=None) -> int:
 
     if problems:
         print("Verification warnings:", file=sys.stderr)
-        for problem in problems:
+        for problem in _format_issues(problems):
             print(f"  - {problem}", file=sys.stderr)
         print(f"Output: {target}")
         return 2
