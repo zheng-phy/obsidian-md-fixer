@@ -72,3 +72,32 @@ def test_images_dir_used(tmp_path):
     code = main([str(md), "--images-dir", str(src)])
     assert (tmp_path / "images" / "a.png").exists()
     assert code == 0
+
+
+def test_verify_mode_clean_returns_0_and_writes_nothing(tmp_path):
+    md = tmp_path / "ok.md"
+    md.write_text("clean text $x^2$", encoding="utf-8")
+    code = main([str(md), "--verify"])
+    assert code == 0
+    assert not (tmp_path / "ok_fixed.md").exists()  # 不产出 _fixed
+    assert md.read_text(encoding="utf-8") == "clean text $x^2$"  # 原文件不动
+
+
+def test_verify_mode_with_issues_returns_2(tmp_path):
+    md = tmp_path / "bad.md"
+    md.write_text("![f](images/gone.png)", encoding="utf-8")  # missing image
+    code = main([str(md), "--verify"])
+    assert code == 2
+    assert not (tmp_path / "bad_fixed.md").exists()  # 不产出 _fixed
+
+
+def test_verify_mode_missing_input_returns_1(tmp_path):
+    assert main([str(tmp_path / "nope.md"), "--verify"]) == 1
+
+
+def test_rerun_hint_printed(tmp_path, capsys):
+    md = tmp_path / "p.md"
+    md.write_text("text", encoding="utf-8")
+    main([str(md), "--skip", "chem_formula"])
+    out = capsys.readouterr().out
+    assert "--skip chem_formula" in out

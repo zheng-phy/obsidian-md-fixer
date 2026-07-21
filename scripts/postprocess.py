@@ -71,6 +71,8 @@ def main(argv=None) -> int:
                         help="source directory for images (default: <md_dir>/images)")
     parser.add_argument("--in-place", action="store_true",
                         help="overwrite the input file (a .bak backup is created)")
+    parser.add_argument("--verify", action="store_true",
+                        help="verify only: report issues, write nothing (exit 0=clean, 2=issues)")
     args = parser.parse_args(argv)
 
     if not args.input.is_file():
@@ -82,7 +84,19 @@ def main(argv=None) -> int:
         return 1
 
     fixer_ids = _resolve_fixer_ids(args.fixers, args.skip)
+
+    if args.verify:
+        problems = verifier.verify(args.input, fixer_ids)
+        if problems:
+            print("Verification warnings:", file=sys.stderr)
+            for problem in problems:
+                print(f"  - {problem}", file=sys.stderr)
+            return 2
+        print(f"Clean: {args.input}")
+        return 0
+
     target, problems = _run_fix_mode(args.input, args.in_place, fixer_ids, args.images_dir)
+    print(f"Re-run: python -m scripts.postprocess {_rerun_args(args)}")
 
     if problems:
         print("Verification warnings:", file=sys.stderr)
@@ -93,6 +107,20 @@ def main(argv=None) -> int:
 
     print(f"Done: {target}")
     return 0
+
+
+def _rerun_args(args) -> str:
+    """Rebuild the CLI flags actually used, for a copy-paste re-run hint."""
+    parts = [f'"{args.input}"']
+    if args.fixers:
+        parts += ["--fixers", args.fixers]
+    if args.skip:
+        parts += ["--skip", args.skip]
+    if args.images_dir:
+        parts += ["--images-dir", f'"{args.images_dir}"']
+    if args.in_place:
+        parts.append("--in-place")
+    return " ".join(parts)
 
 
 if __name__ == "__main__":
