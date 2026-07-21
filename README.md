@@ -20,14 +20,35 @@
 - **无需任何 API token / 网络**——本 skill 不调用外部服务
 - **Obsidian**：最终的笔记展示平台
 
-## 安装
+## 安装与更新
+
+### 方式一：Claude Code plugin（推荐，一键安装/更新）
+
+通过 plugin marketplace，无需 clone 仓库：
+
+```
+# 一次性:把本仓库加为 marketplace
+/plugin marketplace add zheng-phy/obsidian-md-fixer
+
+# 安装
+/plugin install obsidian-md-fixer@zheng-phy
+
+# 以后有新版本,在 skills 管理中点"更新"即可
+```
+
+发布历史与每次迭代的变更说明见本仓库的 [Releases](https://github.com/zheng-phy/obsidian-md-fixer/releases) 页。
+
+### 方式二：手动放入 skills 目录（其他 Agent 平台)
 
 ```bash
 # 1. 克隆到你所用 Agent 平台的 skills 目录（以 Claude Code 为例）
 git clone https://github.com/zheng-phy/obsidian-md-fixer.git
 # 然后将整个文件夹放入 skills 目录，如 ~/.claude/skills/obsidian-md-fixer/
 
-# 2. 安装 Python 依赖（仅测试需要；运行修复器零依赖）
+# 2. 更新:进入该目录拉取最新代码
+cd ~/.claude/skills/obsidian-md-fixer && git pull
+
+# 3. (可选)安装 Python 依赖——仅跑测试需要;运行修复器零依赖
 pip install -r requirements.txt
 ```
 
@@ -59,6 +80,9 @@ python -m scripts.postprocess paper.md --images-dir "D:/mineru输出/images"
 
 # 原地修复(自动创建 paper.md.bak 备份)
 python -m scripts.postprocess paper.md --in-place
+
+# 只校验不修改(语义修复后验证;0=干净,2=仍有 issue,不写文件)
+python -m scripts.postprocess paper.md --verify
 
 # 单独跑一个修复器
 python -m scripts.fixers.table paper.md
