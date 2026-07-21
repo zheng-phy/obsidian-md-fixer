@@ -35,8 +35,33 @@ def fix(text: str) -> str:
     return "".join(out)
 
 
+_TAG_RE = re.compile(r"\\tag\{")
+
+
+def _detect_tag(ln: str, lineno: int) -> list:
+    """Detect malformed \\tag{...} blocks (MinerU equation-number-range misassembly).
+
+    Flags: unbalanced braces inside the tag, stray ( ) mixed into the tag body,
+    and a bare ~ (renders as a space in math mode, breaking a number range).
+    """
+    from scripts.fixers.base import Issue
+
+    problems: list = []
+    for m in _TAG_RE.finditer(ln):
+        # take from \tag{ to end-of-line as the candidate body (tags close at line end)
+        body = ln[m.start():]
+        if body.count("{") != body.count("}"):
+            problems.append(Issue("math_delim", lineno, f"unbalanced braces in \\tag: {body[:40]}"))
+        inner = body[len("\\tag{"):]
+        if "(" in inner or ")" in inner:
+            problems.append(Issue("math_delim", lineno, f"stray parenthesis in \\tag: {body[:40]}"))
+        if "~" in inner:
+            problems.append(Issue("math_delim", lineno, f"bare ~ in \\tag (renders as space): {body[:40]}"))
+    return problems
+
+
 def detect(text: str) -> list:
-    """Report lines with broken \\(... delimiters or leftover <eq> tags."""
+    """Report lines with broken \\(... delimiters, leftover <eq> tags, or malformed \\tag."""
     from scripts.fixers.base import Issue
 
     problems: list = []
@@ -45,6 +70,7 @@ def detect(text: str) -> list:
             problems.append(Issue("math_delim", i, f"broken \\(... delimiter: {m.group(0)[:30]}"))
         for _ in _EQ_RE.finditer(ln):
             problems.append(Issue("math_delim", i, "unconverted <eq> tag"))
+        problems += _detect_tag(ln, i)
     return problems
 
 
