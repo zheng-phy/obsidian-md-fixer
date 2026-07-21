@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 虚拟环境 ----
+venv/
+.venv/
+env/
+
+# ---- 密钥与环境变量（严禁提交）----
+.env
+.env.*
+*.key
+*.pem
+
+# ---- 项目运行输出 ----
+output*/
+test_output/
+
+# ---- PDF 文件（版权与体积考虑，一律不提交；测试 PDF 仅保留在本地）----
+*.pdf
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 编辑器本地配置（可能包含本机绝对路径）----
+.vscode/
+.idea/
+*.swp
+.obsidian/
+
+# ---- 开发过程产物（superpowers plans/specs、本地会话状态，不入库）----
+docs/superpowers/
