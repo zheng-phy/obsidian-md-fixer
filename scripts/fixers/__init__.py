@@ -5,11 +5,11 @@ joins the pipeline (postprocess) and the verifier's aggregated detect().
 """
 
 from scripts.fixers.base import Fixer, Issue
-from scripts.fixers import algorithm, chem_formula, images, math_delim, ocr_cleanup, table
+from scripts.fixers import algorithm, chem_formula, code_fence, images, math_delim, ocr_cleanup, table
 
 __all__ = ["Fixer", "Issue", "register", "all_fixers", "select", "default_order"]
 
-_ORDER = ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "images"]
+_ORDER = ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"]
 _REGISTRY: dict = {}
 
 
@@ -36,4 +36,5 @@ register(Fixer("chem_formula", "chemical formula subscripts", False, chem_formul
 register(Fixer("math_delim", "math delimiter repair", False, math_delim.fix, math_delim.detect))
 register(Fixer("ocr_cleanup", "deterministic OCR-noise cleanup", False, ocr_cleanup.fix, ocr_cleanup.detect))
 register(Fixer("algorithm", "mineru-algorithm div conversion", False, algorithm.fix, algorithm.detect))
+register(Fixer("code_fence", "un-fenced code block wrapping", False, code_fence.fix, code_fence.detect))
 register(Fixer("images", "image copy and path rewrite", True, images.organize, images.detect))
