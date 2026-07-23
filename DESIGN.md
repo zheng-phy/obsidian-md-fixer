@@ -57,6 +57,7 @@ obsidian-md-fixer/
 │       ├── math_delim.py    # <eq>/\(...\)/$ 定界符 + \tag 缺陷
 │       ├── ocr_cleanup.py   # 确定性 OCR 噪音(A 类)
 │       ├── algorithm.py     # mineru-algorithm div 转换
+│       ├── code_fence.py    # 未包代码块的代码识别包块(高置信,模糊上报)
 │       └── images.py        # 图片复制与引用重写
 ├── tests/                   # pytest 单元测试(镜像 scripts 结构)
 ├── .gitignore
@@ -73,7 +74,7 @@ obsidian-md-fixer/
 
 注册表（`fixers/__init__.py`）:
 - `register(fixer)`:新修复器 = 新文件 + 一行注册
-- `default_order()`:固定执行序 `["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "images"]`，新修复器显式选位，不搞拓扑排序
+- `default_order()`:固定执行序 `["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"]`，新修复器显式选位，不搞拓扑排序
 - `select(ids)`:按 `default_order` 过滤出选中修复器（供 `--fixers`/`--skip`)
 - 每个修复器可独立调用：`python -m scripts.fixers.<name> <file.md>`
 
@@ -160,7 +161,17 @@ MinerU 把算法/伪代码（及误圈的说明段落）打进 `<div class="mine
 
 实证依据：algorithm div 内**无真代码**(def/class/import 零命中），只有伪代码与说明文字；真代码 MinerU 走 ` ```python ` 代码块，归 zones 保护区，不经本 fixer。
 
-### 4.6 images(file_based=True)
+### 4.6 code_fence（未包代码块的代码）
+
+MinerU 偶尔把代码段降级为普通文本（缺 ``` 围栏，如 `import numpy`/`def f(` 直接成正文行）。与三线表不同：代码文本本身完整，只是缺围栏，"认出代码行并包块"是机械可判的。
+
+**守"不确定就上报"原则，不试图囊括所有情况：**
+
+- **高置信才包块**：连续 ≥2 个完整锚点行（行首 `import`/`from..import`/`def (`/`class `/`print(`/`return `/`#include`/`plt.`/`for .. in .. :`)，且行内无 `$`、无中文句子）→ 包成 ` ```python `（默认 python；含 `#include`/`std::` 则 cpp，不做更多语言猜测）。
+- **以下任一情况只 detect 上报、不包块**：锚点行混入 `$...$`（公式与代码纠缠）；锚点行混入中文句子（可能是正文提及代码）；孤立单锚点行；语言/边界不明确。
+- 上报格式：`[code_fence] line N: suspected code block (needs agent review)` + 首行摘录，交 Agent 判断。
+
+### 4.7 images(file_based=True)
 
 图片**复制**（非移动）到 `.md` 同级 `images/`，并把本地引用重写为 `images/<文件名>`。外部 URL(http/https）不动。
 
@@ -186,7 +197,8 @@ MinerU 把算法/伪代码（及误圈的说明段落）打进 `<div class="mine
 | 代码块内 OCR 错（`lv`/`lw`、中文标点） | ❌ | Agent（代码块是保护区） |
 | algorithm div 块 | ❌ 整块不渲染 | algorithm |
 | 上下标信息丢失（Sv2→$Sv^2$) | ⚠️ 语义错 | Agent(detect 驱动） |
-| 三线表未被识别为表格（输出成普通文本） | ❌ 列对不齐 | Agent(detect 提示后手工重建；结构信息已丢，不可机械修） |
+| 三线表未被识别为表格（输出成普通文本） | ❌ 列对不齐 | Agent（用户反馈驱动；结构信息已丢，手工重建，不做 detect/fixer) |
+| 代码段降级为普通文本（缺 ``` 围栏） | ❌ 代码不渲染 | code_fence（高置信包块；模糊即上报 Agent) |
 | 图片本体缺失（MinerU 未导图） | ❌ | 引导用户重转（fixer 修不了本体） |
 
 ## 6. SKILL.md 设计
