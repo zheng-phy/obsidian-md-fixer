@@ -40,7 +40,7 @@ Run from the skill's root directory. Always `python -m`, never `python scripts/x
 | Supply an image bundle | `python -m scripts.postprocess <file.md> --images-dir <dir>` |
 | Run one fixer alone | `python -m scripts.fixers.<name> <file.md>` |
 
-Fixers (in pipeline order): `table` → `chem_formula` → `math_delim` → `images`.
+Fixers (in pipeline order): `table` → `chem_formula` → `math_delim` → `ocr_cleanup` → `algorithm` → `code_fence` → `images`.
 Exit codes: 0 = success, 1 = failure (no output), 2 = output produced with verification warnings.
 
 ## Workflow
@@ -54,7 +54,10 @@ Exit codes: 0 = success, 1 = failure (no output), 2 = output produced with verif
    - 2 → report the output path AND list every verifier issue (each is `[fixer] line N: message`).
 5. **Missing images.** If the verifier reports `missing image`, the fixer only rewrites paths — it cannot restore image files. Ask the user where the converter's image bundle is, then re-run with `--images-dir <dir>`. If there is no bundle, tell the user to re-convert with an image-producing tool (e.g. MinerU Standard API).
 6. **Semantic issues stay for you.** Issues the fixers cannot resolve (superscripts like `Sv2`, sentence fragments) are yours to repair by reading the flagged lines — not by editing the scripts.
-7. **Report**: tell the user the `.md` and `images/` paths, and remind them to open the note in Obsidian to confirm tables, formulas, and images render. If the file is outside their vault, suggest moving the whole `<name>/` folder (md + images/) into it.
+7. **User-reported structural misses.** When the user points out content MinerU downgraded to plain text:
+   - **A table that didn't become a table (e.g. a three-line table)** — do NOT auto-convert; the column structure is already lost. Read the flagged text, understand which column is which, and hand-write the Markdown table yourself.
+   - **A code block missing its fence** — run `--fixers code_fence`; it wraps only high-confidence code and reports ambiguous spots (`needs agent review`). After wrapping, fix any math mixed into the block or crammed single-line statements yourself.
+8. **Report**: tell the user the `.md` and `images/` paths, and remind them to open the note in Obsidian to confirm tables, formulas, and images render. If the file is outside their vault, suggest moving the whole `<name>/` folder (md + images/) into it.
 
 ## Optional: Formula Semantic Review
 
