@@ -14,6 +14,20 @@ from scripts.fixers import all_fixers, select
 _CODE_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
 _DISPLAY_MATH_MARKER_RE = re.compile(r"\$\$")
 
+_MATH_ENV_RE = re.compile(r"\$\$|\\tag\{|\\begin\{equation\}")
+_CHEM_LIKE_RE = re.compile(r"(?<![A-Za-z0-9$])(?:(?:[A-Z][a-z]?\d*){2,}|[A-Z][a-z]?\d+)(?![A-Za-z0-9])")
+_PROFILE_MATH_THRESHOLD = 10
+
+
+def doc_profile_hint(text: str) -> str | None:
+    """Suggest --skip chem_formula for math-dense docs with no chemical formulas."""
+    math_hits = len(_MATH_ENV_RE.findall(text))
+    chem_hits = len(_CHEM_LIKE_RE.findall(text))
+    if math_hits >= _PROFILE_MATH_THRESHOLD and chem_hits == 0:
+        return ("doc profile: math-dense document with no chemical formulas detected; "
+                "consider --skip chem_formula to avoid subscript misfires")
+    return None
+
 
 def _check_dollar_balance(text: str) -> list[str]:
     """Report unpaired $ / $$ math delimiters, ignoring code where $ is literal."""
@@ -41,6 +55,9 @@ def verify_issues(md_path: Path, fixer_ids: list | None = None) -> list:
         issues += fixer.detect(target)
     for msg in _check_dollar_balance(text):
         issues.append(Issue("verifier", 0, msg))
+    hint = doc_profile_hint(text)
+    if hint:
+        issues.insert(0, Issue("verifier", 0, hint))
     return issues
 
 
