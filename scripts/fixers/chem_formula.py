@@ -14,6 +14,9 @@ _FORMULA_RE = re.compile(
 )
 _ACRONYM_RE = re.compile(r"[A-Z]+")
 _DIGIT_RUN_RE = re.compile(r"(\d+)")
+_ML_LIKE_RE = re.compile(
+    r"^(?:(?=.*[A-Z])(?=.*[a-z])[A-Za-z]+|[A-Z]{3,}\d+)$"
+)
 
 
 def _fix_segment(seg: str) -> str:
@@ -44,6 +47,11 @@ def find_unfixed_formulas(text: str) -> list[str]:
     return out
 
 
+def _looks_like_ml_term(token: str) -> bool:
+    """Return whether a formula-like token looks like an ML/AI term."""
+    return bool(_ML_LIKE_RE.fullmatch(token))
+
+
 def detect(text: str) -> list:
     """Report each line still containing a bare chemical formula."""
     from scripts.fixers.base import Issue
@@ -51,7 +59,13 @@ def detect(text: str) -> list:
     problems: list = []
     for i, ln in enumerate(text.splitlines(), 1):
         for f in find_unfixed_formulas(ln):
-            problems.append(Issue("chem_formula", i, f"possible unfixed formula: {f}"))
+            message = (
+                f"possible ML/AI term mis-flagged as formula: {f} "
+                "(review; consider --skip chem_formula)"
+                if _looks_like_ml_term(f)
+                else f"possible unfixed formula: {f}"
+            )
+            problems.append(Issue("chem_formula", i, message))
     return problems
 
 
