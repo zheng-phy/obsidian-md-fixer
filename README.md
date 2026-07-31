@@ -1,16 +1,19 @@
 # obsidian-md-fixer
 
-> Fix Markdown already converted from PDF/Word (by MinerU, pandoc, Marker, any converter) so tables, formulas, and images render correctly in Obsidian. 修复已转换 Markdown 在 Obsidian 中的表格、公式、图片渲染问题。
+> Fix Markdown already converted from PDF/Word (by MinerU, pandoc, Marker, any converter) so tables, formulas, code, and images render correctly in Obsidian. 修复已转换 Markdown 在 Obsidian 中的表格、公式、代码、图片渲染问题。
 
-一个平台无关的 AI Agent skill：用确定性的 Python 修复器（fixer）修复转换后 Markdown 的三类常见渲染问题，并把语义级问题（上下标、断句）留给 Agent 按行号清单处理。
+一个平台无关的 AI Agent skill：用确定性的 Python 修复器（fixer）修复转换后 Markdown 的常见渲染问题，并把语义级问题（上下标、断句、图序）留给 Agent 按行号清单处理。**默认面向 CS/AI/数学/物理论文深度优化**；化学式下标为可选修复器，仅化学/材料文档需要显式开启。
 
 ## 它解决什么问题
 
-用 MinerU 等工具把 PDF/Word 转成 Markdown 后，在 Obsidian 里常见三类渲染问题：
+用 MinerU 等工具把 PDF/Word 转成 Markdown 后，在 Obsidian 里常见的渲染问题：
 
 1. 表格仍是 HTML `<table>` 源码，不渲染
-2. `SiO2`、`C4` 这类化学式没有下标，显示异常；或 `\(...` 定界符断裂导致 ParseError
-3. 图片路径错乱或图片缺失，笔记里看不到图
+2. `\(...` 定界符断裂导致 ParseError；行内公式被降级成文本（`X\~B(`、`0<p<1`）
+3. 代码段缺 ``` 围栏、围栏语言误标、围栏碎片化
+4. 图片路径错乱、图片缺失、图与图注分离、图序错乱、图包含未引用图
+5. OCR 痕迹：`�`（U+FFFD）、ff 连字丢失（dificulty）、URL 断行、乱码公式
+6. （可选）`SiO2`、`C6H12O6` 这类化学式没有下标——需显式 `--fixers chem_formula`
 
 本 skill **只修复已转换的 Markdown，不做格式转换**。转换请先用 MinerU / mineru skill 完成——两者是流水线上下游：mineru 把 PDF/Word 转成 md，本 skill 把 md 修到能在 Obsidian 正常渲染。
 
@@ -66,17 +69,20 @@ pip install -r requirements.txt
 在 skill 根目录下运行（必须用 `-m` 方式）：
 
 ```bash
-# 修复 Markdown(默认输出 paper_fixed.md,不覆盖原文件)
+# 修复 Markdown(默认输出 paper_fixed.md,不覆盖原文件;打印每 fixer 变更摘要)
 python -m scripts.postprocess paper.md
 
-# 只跑部分修复器(如源是物理/建模文档,跳过化学式下标避免误伤 Sv^2)
-python -m scripts.postprocess paper.md --skip chem_formula
+# 化学/材料文档:显式开启化学式下标(默认集不含,须显式选中)
+python -m scripts.postprocess paper.md --fixers chem_formula
 
 # 只跑指定修复器
 python -m scripts.postprocess paper.md --fixers table,images
 
 # 图片在别处(如 MinerU 的图包),指定图源目录
 python -m scripts.postprocess paper.md --images-dir "D:/mineru输出/images"
+
+# 输出目录名(默认 images;如需要 Image/ 时用)
+python -m scripts.postprocess paper.md --images-out-dir Image
 
 # 原地修复(自动创建 paper.md.bak 备份)
 python -m scripts.postprocess paper.md --in-place
@@ -95,11 +101,15 @@ python -m scripts.fixers.table paper.md
 | 修复器 | 说明 |
 |------|------|
 | `table` | HTML `<table>` → Markdown 表格，单元格内 LaTeX 公式保留 |
-| `chem_formula` | `SiO2` → `$SiO_2$`、`C6H12O6` → `$C_6H_12O_6$`；图片路径、行内代码、URL 等保护区不受影响 |
-| `math_delim` | `<eq>` 标签 → `$...$`；成对 `\(...\)` → `$...$`；断裂 `\(...` 降级为纯文本（杜绝 ParseError) |
-| `images` | 图片**复制**（非移动）到 `.md` 同级 `images/`，并修复引用路径 |
+| `chem_formula`（可选，opt-in） | `SiO2` → `$SiO_{2}$`、`C6H12O6` → `$C_{6}H_{12}O_{6}$`；118 元素周期表校验 + 数字必需，`GPT2`/`MoE`/`LoRA`/`Sv2` 等绝不误伤；仅化学/材料文档显式开启 |
+| `math_delim` | `<eq>` 标签 → `$...$`；成对 `\(...\)` → `$...$`；断裂 `\(...` 降级为纯文本（杜绝 ParseError)；detect 报行内公式降级（`X\~B(`、`0<p<1`）与乱码公式 |
+| `ocr_cleanup` | 确定性 OCR 噪音：`\mathrm` 字母空格、`f^{\backslash…*}`、数字拆散、HTML 实体、ff 连字词典（dificulty→difficulty）；detect 报 U+FFFD、控制字符、元组下标、字母并跑 |
+| `algorithm` | MinerU algorithm div 转换：锚点行进代码块，含数学的伪代码整段回正文（公式恢复渲染） |
+| `code_fence` | 缺 ``` 围栏的高置信代码包块（已有围栏零改动）；detect 报围栏语言误标/碎片化/缩进丢失 |
+| `url_join` | 同行断 URL 接合（`arxiv.org/abs/ 2601.05808` → 完整 URL)；跨行断 URL 只报不改 |
+| `images` | 图片**复制**（非移动）到 `.md` 同级目录并修复引用路径（`--images-out-dir` 可改目录名）；detect 报缺失图、图-图注分离、图序异常、未引用图、轴标签误标 |
 
-**机械修复 vs 语义修复**：修复器只做"机械可判"的修复。上下标语义（`Sv2` 是 `Sv²` 还是 `Sv₂`)、断句这类需要理解上下文的问题，由 verifier 以带行号的清单报出，交给 Agent 阅读后修复——不碰确定性工具不敢判断的部分。
+**机械修复 vs 语义修复**：修复器只做"机械可判"的修复。上下标语义（`Sv2` 是 `Sv²` 还是 `Sv₂`)、断句、图序这类需要理解上下文的问题，由 verifier 以带行号的清单报出，交给 Agent 阅读后修复——不碰确定性工具不敢判断的部分。换行符（CRLF/LF）逐字节保留，不因修复改变。
 
 ## 开发与测试
 
@@ -107,7 +117,7 @@ python -m scripts.fixers.table paper.md
 python -m pytest tests/ -v
 ```
 
-52 个单元测试覆盖全部修复器、注册表、编排器与边界（含中文/空格路径）。设计文档见 [DESIGN.md](DESIGN.md)。
+290+ 个单元测试覆盖全部修复器、注册表、编排器与边界（含中文/空格路径、换行符保留）。设计文档见 [DESIGN.md](DESIGN.md)（含 v2.0.0 转型决策记录）。
 
 ## 隐私说明
 
