@@ -7,6 +7,7 @@ Exit codes: 0 = success, 1 = failure (no output), 2 = success with warnings.
 """
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -28,6 +29,17 @@ def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None) -> list:
 
 
 _COLLAPSE_THRESHOLD = 15
+
+
+def _write_issues_json(path: Path, issues: list) -> None:
+    """Write structured verifier issues to a JSON file."""
+    data = [
+        {"fixer": issue.fixer, "line": issue.line, "message": issue.message}
+        for issue in issues
+    ]
+    Path(path).write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def _format_issues(issues: list) -> list:
@@ -102,6 +114,10 @@ def main(argv=None) -> int:
                         help="overwrite the input file (a .bak backup is created)")
     parser.add_argument("--verify", action="store_true",
                         help="verify only: report issues, write nothing (exit 0=clean, 2=issues)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="run text fixers in memory and report changes without writing files")
+    parser.add_argument("--issues-json", type=Path, default=None,
+                        help="write structured issue list (JSON) to this path")
     args = parser.parse_args(argv)
 
     if not args.input.is_file():
@@ -116,6 +132,8 @@ def main(argv=None) -> int:
 
     if args.verify:
         problems = verifier.verify_issues(args.input, fixer_ids)
+        if args.issues_json:
+            _write_issues_json(args.issues_json, problems)
         if problems:
             print("Verification warnings:", file=sys.stderr)
             for problem in _format_issues(problems):
@@ -124,7 +142,24 @@ def main(argv=None) -> int:
         print(f"Clean: {args.input}")
         return 0
 
+    if args.dry_run:
+        text = args.input.read_text(encoding="utf-8")
+        print("Dry run (no files written):")
+        for fixer in select(fixer_ids):
+            if fixer.file_based:
+                continue
+            updated = fixer.run(text)
+            print(f"  [{fixer.id}] {'would modify' if updated != text else 'no change'}")
+            text = updated
+        if args.issues_json:
+            _write_issues_json(
+                args.issues_json, verifier.verify_issues(args.input, fixer_ids)
+            )
+        return 0
+
     target, problems = _run_fix_mode(args.input, args.in_place, fixer_ids, args.images_dir)
+    if args.issues_json:
+        _write_issues_json(args.issues_json, problems)
     print(f"Re-run: python -m scripts.postprocess {_rerun_args(args)}")
 
     if problems:
@@ -149,6 +184,8 @@ def _rerun_args(args) -> str:
         parts += ["--images-dir", f'"{args.images_dir}"']
     if args.in_place:
         parts.append("--in-place")
+    if args.issues_json:
+        parts += ["--issues-json", f'"{args.issues_json}"']
     return " ".join(parts)
 
 
