@@ -81,3 +81,32 @@ def test_detect_line_numbers_across_fences():
     text = "```python\nimport os\n```\n正文\ndef f(x):\n    return x\n"
     problems = detect(text)
     assert any(p.line == 5 for p in problems)
+
+
+def test_detect_wrong_language_label():
+    # K3 解析形态:prolog 标签 + python 内容
+    text = "```prolog\nimport numpy as np\ndef f(x):\n    return x\n```\n"
+    problems = detect(text)
+    assert any("prolog" in p.message and "python" in p.message for p in problems)
+
+
+def test_detect_fragmented_fences():
+    text = "```python\nimport os\n```\n\n\n```python\nimport sys\n```\n"
+    problems = detect(text)
+    assert any("fragmented" in p.message for p in problems)
+
+
+def test_detect_no_indentation_loss():
+    # 8 行内容、含 def/if/for、全部行首无缩进
+    text = "```python\ndef f():\nif x:\nfor i in range(3):\nprint(i)\nx = 1\ny = 2\nz = 3\nw = 4\n```\n"
+    problems = detect(text)
+    assert any("no indentation" in p.message for p in problems)
+
+
+def test_detect_normal_python_block_no_structure_issues():
+    text = "```python\nimport os\ndef f(x):\n    return x\n```\n"
+    problems = detect(text)
+    assert not any(
+        "labeled" in p.message or "fragmented" in p.message or "no indentation" in p.message
+        for p in problems
+    )

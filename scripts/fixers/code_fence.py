@@ -95,15 +95,56 @@ def fix(text: str) -> str:
     return "\n".join(out)
 
 
+# Fence structural detects. Wrong labels MinerU sometimes emits for python
+# content; the K3 tech report uses "prolog" for python blocks.
+_WRONG_LANG = {"prolog", "txt", "makefile", "lua"}
+_FENCE_OPEN_RE = re.compile(r"^```(\w*)$")
+_FENCE_CLOSE_RE = re.compile(r"^```\s*$")
+_KEYWORD_LINE_RE = re.compile(r"^\s*(def\s|for\s|if\s)")
+_SHORT_GAP_LEN = 20  # lines between fragmented fences may be blank or short
+_INDENT_LOSS_MIN_LINES = 8
+
+
+def _fence_blocks(lines: list) -> list:
+    """Yield (open_line_no, lang, content_lines) for each CLOSED fence block.
+
+    An unclosed fence swallows the rest of the file (conservative, matching
+    _split_fence_runs) and yields no block.
+    """
+    blocks: list = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        m = _FENCE_OPEN_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        lang = m.group(1).lower()
+        content: list = []
+        j = i + 1
+        while j < n and not _FENCE_CLOSE_RE.match(lines[j]):
+            content.append(lines[j])
+            j += 1
+        if j < n:  # closed
+            blocks.append((i + 1, lang, content))
+            i = j + 1
+        else:  # unclosed: rest is fenced
+            i = n
+    return blocks
+
+
 def detect(text: str) -> list:
     """Report suspected code blocks needing agent review (with line number).
 
     Anchors inside an existing fence are never reported (fenced code is by
     definition already handled) — keeps fix/detect self-consistent.
+    Also reports fence structure issues: wrong language label, adjacent
+    fragmented fences, and possible indent loss.
     """
     problems = []
+    lines = text.split("\n")
     lineno = 0
-    for in_fence, run in _split_fence_runs(text.split("\n")):
+    for in_fence, run in _split_fence_runs(lines):
         if in_fence:
             lineno += len(run)
             continue
@@ -111,4 +152,32 @@ def detect(text: str) -> list:
             lineno += 1
             if _is_anchor(ln):
                 problems.append(Issue("code_fence", lineno, f"suspected code block (needs agent review): {ln.strip()[:40]}"))
+
+    blocks = _fence_blocks(lines)
+    for idx, (start, lang, content) in enumerate(blocks):
+        if lang in _WRONG_LANG and sum(1 for ln in content if _is_anchor(ln)) >= 2:
+            problems.append(Issue(
+                "code_fence", start,
+                f"fence labeled '{lang}' but content looks like python",
+            ))
+        if (
+            len(content) >= _INDENT_LOSS_MIN_LINES
+            and any(_KEYWORD_LINE_RE.match(ln) for ln in content)
+            and all(not ln.startswith((" ", "\t")) for ln in content if ln.strip())
+        ):
+            problems.append(Issue(
+                "code_fence", start,
+                "code block has no indentation (possible indent loss)",
+            ))
+        if idx > 0:
+            prev = blocks[idx - 1]
+            close_line = prev[0] + 1 + len(prev[2])  # 1-based closing line
+            gap = lines[close_line : start - 1]
+            if 1 <= len(gap) <= 3 and all(
+                not ln.strip() or len(ln.strip()) <= _SHORT_GAP_LEN for ln in gap
+            ):
+                problems.append(Issue(
+                    "code_fence", start,
+                    "adjacent fragmented fences (possible pagination split) — consider merging",
+                ))
     return problems
