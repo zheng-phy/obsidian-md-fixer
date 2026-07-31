@@ -3,12 +3,12 @@ from scripts.fixers.base import Issue, Fixer
 
 
 def test_default_order():
-    assert default_order() == ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"]
+    assert default_order() == ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]
 
 
 def test_all_fixers_registered():
     ids = {f.id for f in all_fixers()}
-    assert {"table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"} <= ids
+    assert {"table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"} <= ids
 
 
 def test_select_subset():
