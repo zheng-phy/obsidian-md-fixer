@@ -78,13 +78,16 @@ def _cli(argv=None) -> int:
     import sys
     from pathlib import Path
 
+    from scripts.textio import read_text_preserve, write_text_preserve
+
     if argv is None:
         argv = sys.argv[1:]
     if not argv:
         print("usage: python -m scripts.fixers.math_delim <file.md>", file=sys.stderr)
         return 1
     p = Path(argv[0])
-    p.write_text(fix(p.read_text(encoding="utf-8")), encoding="utf-8")
+    text, newline = read_text_preserve(p)
+    write_text_preserve(p, fix(text), newline)
     print(f"Done: {p}")
     return 0
 

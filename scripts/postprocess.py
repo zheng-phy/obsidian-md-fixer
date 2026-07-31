@@ -14,6 +14,7 @@ from pathlib import Path
 
 from scripts import verifier
 from scripts.fixers import all_fixers, default_order, select
+from scripts.textio import read_text_preserve, write_text_preserve
 
 
 def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None) -> list:
@@ -73,11 +74,11 @@ def process_markdown(md_path: Path, images_source_dir: Path | None, fixer_ids: l
     md_path = Path(md_path)
     chosen = select(fixer_ids)
 
-    text = md_path.read_text(encoding="utf-8")
+    text, newline = read_text_preserve(md_path)
     for fixer in chosen:
         if not fixer.file_based:
             text = fixer.run(text)
-    md_path.write_text(text, encoding="utf-8")
+    write_text_preserve(md_path, text, newline)
 
     for fixer in chosen:
         if fixer.file_based:
@@ -143,7 +144,7 @@ def main(argv=None) -> int:
         return 0
 
     if args.dry_run:
-        text = args.input.read_text(encoding="utf-8")
+        text, _ = read_text_preserve(args.input)
         print("Dry run (no files written):")
         for fixer in select(fixer_ids):
             if fixer.file_based:

@@ -8,6 +8,8 @@ import re
 import shutil
 from pathlib import Path
 
+from scripts.textio import read_text_preserve, write_text_preserve
+
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s")
 
@@ -24,7 +26,7 @@ def organize(md_path: Path, source_images_dir: Path) -> None:
             if img.is_file():
                 shutil.copy2(img, target_dir / img.name)
 
-    text = md_path.read_text(encoding="utf-8")
+    text, newline = read_text_preserve(md_path)
 
     def _rewrite(match: re.Match) -> str:
         alt, path = match.group(1), match.group(2)
@@ -32,7 +34,7 @@ def organize(md_path: Path, source_images_dir: Path) -> None:
             return match.group(0)
         return f"![{alt}](images/{Path(path).name})"
 
-    md_path.write_text(_MD_IMAGE_RE.sub(_rewrite, text), encoding="utf-8")
+    write_text_preserve(md_path, _MD_IMAGE_RE.sub(_rewrite, text), newline)
 
 
 def detect(md_path: Path) -> list:
