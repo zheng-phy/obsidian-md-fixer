@@ -32,7 +32,9 @@ def default_order() -> list:
 
 
 register(Fixer("table", "HTML tables to Markdown", False, table.convert_html_tables, table.detect))
-register(Fixer("chem_formula", "chemical formula subscripts", False, chem_formula.fix, chem_formula.detect))
+# chem_formula is opt-in since v2: subscripts are a chemistry-domain change most
+# CS/AI/math/physics papers do not want; select via --fixers chem_formula.
+register(Fixer("chem_formula", "chemical formula subscripts", False, chem_formula.fix, chem_formula.detect, default_on=False))
 register(Fixer("math_delim", "math delimiter repair", False, math_delim.fix, math_delim.detect))
 register(Fixer("ocr_cleanup", "deterministic OCR-noise cleanup", False, ocr_cleanup.fix, ocr_cleanup.detect))
 register(Fixer("algorithm", "mineru-algorithm div conversion", False, algorithm.fix, algorithm.detect))

@@ -11,7 +11,7 @@ def test_fix_mode_writes_fixed_copy_and_keeps_original(tmp_path):
     fixed = tmp_path / "paper_fixed.md"
     content = fixed.read_text(encoding="utf-8")
     assert "<table>" not in content
-    assert "$SiO_{2}$" in content
+    assert "$" not in content  # v2 默认集不含 chem_formula,SiO2 不再自动 wrap
     assert md.read_text(encoding="utf-8").startswith("<table>")  # original untouched
 
 
@@ -23,7 +23,7 @@ def test_in_place_creates_backup(tmp_path):
 
     assert code == 0
     assert (tmp_path / "paper.md.bak").exists()
-    assert "$SiO_{2}$" in md.read_text(encoding="utf-8")
+    assert md.read_text(encoding="utf-8") == "SiO2"  # 默认集不动化学式
 
 
 def test_missing_input_returns_1(tmp_path):

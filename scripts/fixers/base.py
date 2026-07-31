@@ -24,13 +24,18 @@ class Issue:
 
 @dataclass
 class Fixer:
-    """One deterministic repair tool. file_based=True means it needs the filesystem."""
+    """One deterministic repair tool. file_based=True means it needs the filesystem.
+
+    default_on=False marks opt-in fixers (run only when explicitly requested
+    via --fixers); they stay registered and selectable.
+    """
 
     id: str
     description: str
     file_based: bool
     run: Callable
     detect: Callable[[Any], list]
+    default_on: bool = True
 
 
 _ZONE_RE = re.compile(

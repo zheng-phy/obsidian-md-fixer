@@ -18,11 +18,15 @@ from scripts.textio import read_text_preserve, write_text_preserve
 
 
 def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None) -> list:
-    """Compute the ordered fixer id list from --fixers / --skip."""
+    """Compute the ordered fixer id list from --fixers / --skip.
+
+    No --fixers: the default set is only default_on fixers (chem_formula is
+    opt-in since v2). Explicit --fixers selects exactly what it names.
+    """
     if fixers_arg:
         ids = [s.strip() for s in fixers_arg.split(",") if s.strip()]
     else:
-        ids = default_order()
+        ids = [f.id for f in all_fixers() if f.default_on]
     if skip_arg:
         skip = {s.strip() for s in skip_arg.split(",") if s.strip()}
         ids = [i for i in ids if i not in skip]
