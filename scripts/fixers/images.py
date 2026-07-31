@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_HEADING_RE = re.compile(r"^#{1,6}\s")
 
 
 def organize(md_path: Path, source_images_dir: Path) -> None:
@@ -35,16 +36,31 @@ def organize(md_path: Path, source_images_dir: Path) -> None:
 
 
 def detect(md_path: Path) -> list:
-    """Report each referenced local image that does not exist."""
+    """Report missing local images and images appearing before the first heading."""
     from scripts.fixers.base import Issue
 
     md_path = Path(md_path)
+    lines = md_path.read_text(encoding="utf-8").splitlines()
     problems: list = []
-    for i, ln in enumerate(md_path.read_text(encoding="utf-8").splitlines(), 1):
-        for path in _MD_IMAGE_RE.findall(ln):
-            if not path[1].startswith(("http://", "https://")):
-                if not (md_path.parent / path[1]).exists():
-                    problems.append(Issue("images", i, f"missing image: {path[1]}"))
+    first_heading = next(
+        (i for i, line in enumerate(lines, 1) if _HEADING_RE.match(line)), None
+    )
+    for i, line in enumerate(lines, 1):
+        for match in _MD_IMAGE_RE.finditer(line):
+            path = match.group(2)
+            if not path.startswith(("http://", "https://")) and not (
+                md_path.parent / path
+            ).exists():
+                problems.append(Issue("images", i, f"missing image: {path}"))
+            if first_heading is not None and i < first_heading:
+                problems.append(
+                    Issue(
+                        "images",
+                        i,
+                        "image appears before first heading "
+                        f"(possible figure-caption misplacement): {path}",
+                    )
+                )
     return problems
 
 
