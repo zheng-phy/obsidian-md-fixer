@@ -108,6 +108,8 @@ def fix(text: str) -> str:
 
 
 _TUPLE_SUBSCRIPT_RE = re.compile(r"[\^_]\{ *\d+( +\d+)+\}")
+_FFFD_RE = re.compile(r"�")
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def detect(text: str) -> list:
@@ -115,8 +117,8 @@ def detect(text: str) -> list:
     problems = []
     pos = 0
     for kind, seg in split_zones(text):
+        base_line = text[:pos].count("\n") + 1
         if kind == "math":
-            base_line = text[:pos].count("\n") + 1
             for m in _TUPLE_SUBSCRIPT_RE.finditer(seg):
                 problems.append(Issue(
                     "ocr_cleanup",
@@ -131,6 +133,19 @@ def detect(text: str) -> list:
                         base_line + seg[: m.start()].count("\n"),
                         "letter-run in math (possible split word) — review",
                     ))
+        if kind in ("text", "math"):
+            for line in {base_line + seg[: m.start()].count("\n") for m in _FFFD_RE.finditer(seg)}:
+                problems.append(Issue(
+                    "ocr_cleanup", line,
+                    "U+FFFD replacement char (lost glyph; restore from PDF)",
+                ))
+            ctl = _CONTROL_RE.search(seg)
+            if ctl:
+                problems.append(Issue(
+                    "ocr_cleanup",
+                    base_line + seg[: ctl.start()].count("\n"),
+                    f"control char U+{ord(ctl.group(0)):04X} in text",
+                ))
         pos += len(seg)
     for i, ln in enumerate(text.splitlines(), 1):
         if _GREEK_PLACEHOLDER_RE.search(ln):

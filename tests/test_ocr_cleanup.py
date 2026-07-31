@@ -107,3 +107,28 @@ def test_letter_run_3_4_reported_not_fixed():
 def test_letter_run_detect_skips_five_plus():
     # 5+ 由 fix 合并,detect 不报(3-4 才报)
     assert not any("letter-run" in p.message for p in detect("$a b c d e$"))
+
+
+def test_detect_fffd_reported_once_per_line():
+    problems = detect("第一行\n这里有�字�符\n结尾")
+    hits = [p for p in problems if "U+FFFD" in p.message]
+    assert len(hits) == 1 and hits[0].line == 2  # 同行多处报一条
+
+
+def test_detect_control_char_reported():
+    problems = detect("第一行\n退格\x08字符\n结尾")
+    hits = [p for p in problems if "control char" in p.message]
+    assert len(hits) == 1 and hits[0].line == 2
+    assert "U+0008" in hits[0].message
+
+
+def test_detect_clean_text_no_char_issues():
+    problems = detect("干净文本 $x_{1}$ 正常")
+    assert not any("U+FFFD" in p.message or "control char" in p.message for p in problems)
+
+
+def test_detect_fffd_skipped_in_code_fence():
+    text = "```python\nx = '�'\n```\n正文 �"
+    problems = detect(text)
+    hits = [p for p in problems if "U+FFFD" in p.message]
+    assert len(hits) == 1 and hits[0].line == 4  # 只有正文行 4,code 段内不报
