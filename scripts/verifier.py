@@ -30,14 +30,18 @@ def doc_profile_hint(text: str) -> str | None:
 
 
 def _check_dollar_balance(text: str) -> list[str]:
-    """Report unpaired $ / $$ math delimiters, ignoring code where $ is literal."""
+    """Report unpaired $ / $$ delimiters with their first unpaired line."""
     problems: list[str] = []
-    body = _CODE_RE.sub("", text)
+    body = _CODE_RE.sub(lambda match: "\n" * match.group(0).count("\n"), text)
+    body = body.replace("\\$", "\x04")
     display_markers = len(_DISPLAY_MATH_MARKER_RE.findall(body))
     if display_markers % 2 != 0:
-        problems.append("Unpaired $$ delimiters")
-    if _DISPLAY_MATH_MARKER_RE.sub("", body).count("$") % 2 != 0:
-        problems.append("Unpaired $ delimiters")
+        line = body[: body.rfind("$$")].count("\n") + 1
+        problems.append(f"line {line}: unpaired $$ delimiters")
+    single_dollars = _DISPLAY_MATH_MARKER_RE.sub("", body)
+    if single_dollars.count("$") % 2 != 0:
+        line = single_dollars[: single_dollars.rfind("$")].count("\n") + 1
+        problems.append(f"line {line}: unpaired $ delimiters")
     return problems
 
 
