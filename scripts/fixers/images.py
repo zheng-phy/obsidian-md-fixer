@@ -124,6 +124,28 @@ def detect(md_path: Path) -> list:
                 "possible figure order anomaly (captions out of sequence) — verify visually",
             )
         )
+
+    # Image bundle audit: files in <md_dir>/images/ that no reference uses.
+    # Read-only; a flood of issues folds via the standard _format_issues
+    # collapse in postprocess.
+    referred: set = set()
+    for line in lines:
+        for match in _MD_IMAGE_RE.finditer(line):
+            path = match.group(2)
+            if not path.startswith(("http://", "https://")):
+                referred.add(Path(path).name)
+    bundle = md_path.parent / "images"
+    if bundle.is_dir():
+        for img in sorted(bundle.iterdir()):
+            if img.is_file() and img.name not in referred:
+                problems.append(
+                    Issue(
+                        "images",
+                        0,
+                        "unreferenced image in bundle (possible missing figure "
+                        f"or formula fragment): {img.name}",
+                    )
+                )
     return problems
 
 

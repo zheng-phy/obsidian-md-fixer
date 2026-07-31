@@ -70,3 +70,29 @@ def test_out_of_order_captions(tmp_path):
     )
     problems = detect(md)
     assert any("order anomaly" in p.message for p in problems)
+
+
+def test_unreferenced_images_reported(tmp_path):
+    md = _write_with_images(
+        tmp_path, "p.md",
+        "# T\n![f](images/a.png)\nFigure 1: x\n",
+        imgs=("a.png", "b.png", "c.png"),
+    )
+    problems = detect(md)
+    unreferenced = [p for p in problems if "unreferenced" in p.message]
+    assert len(unreferenced) == 2
+    names = {p.message.split(": ")[-1] for p in unreferenced}
+    assert names == {"b.png", "c.png"}
+
+
+def test_all_referenced_no_unreferenced(tmp_path):
+    md = _write_with_images(tmp_path, "p.md", "# T\n![f](images/a.png)\nFigure 1: x\n", imgs=("a.png",))
+    problems = detect(md)
+    assert not any("unreferenced" in p.message for p in problems)
+
+
+def test_no_images_dir_silent(tmp_path):
+    md = tmp_path / "p.md"
+    md.write_text("# T\n![f](images/a.png)\nFigure 1: x\n", encoding="utf-8")
+    problems = detect(md)  # images/ 不存在,静默跳过
+    assert not any("unreferenced" in p.message for p in problems)
