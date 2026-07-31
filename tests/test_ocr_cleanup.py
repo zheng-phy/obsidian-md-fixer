@@ -117,6 +117,13 @@ def test_detect_fffd_reported_once_per_line():
     assert len(hits) == 1 and hits[0].line == 2  # 同行多处报一条
 
 
+def test_detect_fffd_once_across_zones_on_same_line():
+    # 同行跨 text/math 段仍只报一条(全文行级去重)
+    problems = detect("(�) 与 $x�y$ 同行")
+    hits = [p for p in problems if "U+FFFD" in p.message]
+    assert len(hits) == 1 and hits[0].line == 1
+
+
 def test_detect_control_char_reported():
     problems = detect("第一行\n退格\x08字符\n结尾")
     hits = [p for p in problems if "control char" in p.message]

@@ -151,6 +151,7 @@ def detect(text: str) -> list:
     """Report semantic-class OCR issues (Greek ?? placeholders); never auto-fixed."""
     problems = []
     pos = 0
+    fffd_lines: set = set()  # dedup across zones: one issue per LINE
     for kind, seg in split_zones(text):
         base_line = text[:pos].count("\n") + 1
         if kind == "math":
@@ -169,11 +170,9 @@ def detect(text: str) -> list:
                         "letter-run in math (possible split word) — review",
                     ))
         if kind in ("text", "math"):
-            for line in {base_line + seg[: m.start()].count("\n") for m in _FFFD_RE.finditer(seg)}:
-                problems.append(Issue(
-                    "ocr_cleanup", line,
-                    "U+FFFD replacement char (lost glyph; restore from PDF)",
-                ))
+            fffd_lines.update(
+                base_line + seg[: m.start()].count("\n") for m in _FFFD_RE.finditer(seg)
+            )
             ctl = _CONTROL_RE.search(seg)
             if ctl:
                 problems.append(Issue(
@@ -182,6 +181,11 @@ def detect(text: str) -> list:
                     f"control char U+{ord(ctl.group(0)):04X} in text",
                 ))
         pos += len(seg)
+    for line in sorted(fffd_lines):
+        problems.append(Issue(
+            "ocr_cleanup", line,
+            "U+FFFD replacement char (lost glyph; restore from PDF)",
+        ))
     for i, ln in enumerate(text.splitlines(), 1):
         if _GREEK_PLACEHOLDER_RE.search(ln):
             problems.append(Issue("ocr_cleanup", i, "suspected OCR char-mapping error (?? placeholder)"))
