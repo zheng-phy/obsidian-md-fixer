@@ -17,9 +17,11 @@ from scripts.fixers.base import Issue, split_zones
 _CODE_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
 _DISPLAY_MATH_MARKER_RE = re.compile(r"\$\$")
 
-# Closed list of chemistry-domain context words (stable domain vocabulary,
+# Closed list of chemistry-domain context evidence (stable domain vocabulary,
 # allowed by the v2 constraint; everything else stays open in detect()).
-_CHEM_CONTEXT_WORDS = ("溶液", "反应", "材料", "化学", "mol", "L", "XRD", "SEM", "TEM", "chemical", "reaction")
+# Regex, not substring: a bare "L" would match every LLM paper, and "mol"
+# matches "molecular".
+_CHEM_CONTEXT_RE = re.compile(r"溶液|反应|材料|化学|mol/L|XRD|SEM|TEM|\bchemical\b|\breaction\b")
 _CHEM_OPPORTUNITY_THRESHOLD = 3
 
 
@@ -43,7 +45,7 @@ def _chem_opportunity(text: str) -> Issue | None:
     if len(tokens) < _CHEM_OPPORTUNITY_THRESHOLD:
         return None
     examples = ", ".join(sorted(tokens)[:2])
-    if any(w in text for w in _CHEM_CONTEXT_WORDS):
+    if _CHEM_CONTEXT_RE.search(text):
         msg = (f"detected {len(tokens)} formula-like tokens (e.g. {examples}) — "
                "likely a chemistry document; re-run with `--fixers chem_formula`")
     else:
@@ -52,12 +54,13 @@ def _chem_opportunity(text: str) -> Issue | None:
     return Issue("verifier", 0, msg)
 
 
-# Residual-risk net for chem_formula: a wrap like $V_3$ / $K_3$ (single element
-# letter + bare digit subscript) could just as well be a variable subscript
-# (V_3 = version 3, K_3 = graph constant). The periodic-table gate cannot
-# reject these, so when chem_formula ran they are flagged for agent review —
-# small count by construction, never a flood.
-_LOW_CONFIDENCE_WRAP_RE = re.compile(r"^\$([A-Z][a-z]?)_\d+\$$")
+# Residual-risk net for chem_formula: a wrap like $V_{3}$ / $K_{3}$ (single
+# element letter + digit subscript — braced since the v2 multi-digit fix)
+# could just as well be a variable subscript (V_3 = version 3, K_3 = graph
+# constant). The periodic-table gate cannot reject these, so when chem_formula
+# ran they are flagged for agent review — small count by construction.
+# Braces optional so hand-written/unbraced $V_3$ forms are caught too.
+_LOW_CONFIDENCE_WRAP_RE = re.compile(r"^\$([A-Z][a-z]?)_\{?\d+\}?\$$")
 
 
 def _low_confidence_wraps(text: str) -> list:

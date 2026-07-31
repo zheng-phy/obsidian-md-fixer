@@ -6,7 +6,7 @@ External image URLs (http/https) are left unchanged.
 
 import re
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from scripts.textio import read_text_preserve, write_text_preserve
 
@@ -129,16 +129,23 @@ def detect(md_path: Path) -> list:
             )
         )
 
-    # Image bundle audit: files in <md_dir>/images/ that no reference uses.
+    # Image bundle audit: files in the bundle dir that no reference uses.
+    # The bundle dir is derived from the references' common parent (so a custom
+    # --images-out-dir like Image/ is audited too), falling back to "images".
     # Read-only; a flood of issues folds via the standard _format_issues
     # collapse in postprocess.
     referred: set = set()
+    ref_parents: set = set()
     for line in lines:
         for match in _MD_IMAGE_RE.finditer(line):
             path = match.group(2)
             if not path.startswith(("http://", "https://")):
                 referred.add(Path(path).name)
-    bundle = md_path.parent / "images"
+                ref_parents.add(str(PurePosixPath(path).parent))
+    if len(ref_parents) == 1 and next(iter(ref_parents)) not in (".", ""):
+        bundle = md_path.parent / next(iter(ref_parents))
+    else:
+        bundle = md_path.parent / "images"
     if bundle.is_dir():
         for img in sorted(bundle.iterdir()):
             if img.is_file() and img.name not in referred:

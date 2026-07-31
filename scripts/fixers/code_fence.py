@@ -173,7 +173,7 @@ def detect(text: str) -> list:
             prev = blocks[idx - 1]
             close_line = prev[0] + 1 + len(prev[2])  # 1-based closing line
             gap = lines[close_line : start - 1]
-            if 1 <= len(gap) <= 3 and all(
+            if len(gap) <= 3 and all(
                 not ln.strip() or len(ln.strip()) <= _SHORT_GAP_LEN for ln in gap
             ):
                 problems.append(Issue(

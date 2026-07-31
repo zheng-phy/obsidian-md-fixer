@@ -81,3 +81,28 @@ def test_low_confidence_wrap_not_run_without_chem(tmp_path):
     md.write_text("关于 $V_3$ 的讨论", encoding="utf-8")
     issues = verify_issues(md, ["table"])  # chem 未选中 -> 不运行
     assert not any("low-confidence" in i.message for i in issues)
+
+
+def test_low_confidence_wrap_fires_on_actual_chem_output(tmp_path):
+    """端到端:fix() 产出的是带花括号的 $V_{3}$——复核网必须仍能命中。"""
+    from scripts.fixers.chem_formula import fix
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text(fix("模型 V3 与 C4 对比"), encoding="utf-8")
+    assert "$V_{3}$" in md.read_text(encoding="utf-8")  # 花括号形态
+    issues = verify_issues(md, ["chem_formula"])
+    low = [i for i in issues if "low-confidence" in i.message]
+    assert len(low) == 2
+
+
+def test_chem_opportunity_neutral_wording_on_llm_doc(tmp_path):
+    """LLM 文档的证据词("LLM"里就有 L!)不得把措辞升级为 likely chemistry。"""
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text("LLM benchmark rubric: C1, C2, C3 and V4 labels", encoding="utf-8")
+    issues = verify_issues(md, ["table"])
+    hint = [i for i in issues if "formula-like" in i.message]
+    assert hint, "opportunity hint should fire (4 distinct valid tokens)"
+    assert "likely a chemistry" not in hint[0].message

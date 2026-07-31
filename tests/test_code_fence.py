@@ -96,6 +96,12 @@ def test_detect_fragmented_fences():
     assert any("fragmented" in p.message for p in problems)
 
 
+def test_detect_fragmented_fences_zero_gap():
+    text = "```python\nimport os\n```\n```python\nimport sys\n```\n"
+    problems = detect(text)
+    assert any("fragmented" in p.message for p in problems)
+
+
 def test_detect_no_indentation_loss():
     # 8 行内容、含 def/if/for、全部行首无缩进
     text = "```python\ndef f():\nif x:\nfor i in range(3):\nprint(i)\nx = 1\ny = 2\nz = 3\nw = 4\n```\n"

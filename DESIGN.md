@@ -139,11 +139,11 @@ Agent 在框架内按文义选档，不发明其他转法。
 
 效果：`GSM8K`/`MATH500`/`AIME24`/`GPT2`/`MoE`/`LoRA`/`FLOPs`/`LLMs`/`APIs`/`Sv2`/`SiC`/`BRCA1`/`IL6`/`COX2` 全拒——v1 时代 `--skip chem_formula` 的两大理由（数模/LLM 误伤）从构造上消失。周期表是物理钉死的封闭集合，永不增长——这是脚本内唯一白名单（D4）。多位数下标带花括号（修 v1 局限：`C_{6}` 而非 `C_6`）。
 
-**残余漏网 → 低置信复核网（Task 7）**：周期表也杀不掉的只有"单元素字母+纯数字下标"形（`$V_3$`/`$K_3$`/`$C_4$`——可能是变量下标而非化学式）。chem_formula 被选中时，verify 扫描 math 段逐条报 `low-confidence wrap`，交 Agent 对照原文判断。量小不报洪。
+**残余漏网 → 低置信复核网（Task 7）**：周期表也杀不掉的只有"单元素字母+纯数字下标"形（`$V_{3}$`/`$K_{3}$`/`$C_{4}$`——可能是变量下标而非化学式）。chem_formula 被选中时，verify 扫描 math 段逐条报 `low-confidence wrap`，交 Agent 对照原文判断。量小不报洪。（正则花括号可选：fixer 产出带花括号形态，手写无花括号形态同样覆盖。）
 
-**ML/AI 术语提示保留（detect）**：`_ML_LIKE_RE` 对仍裸漏的可疑 token（如 `GPT2`）提示"possible ML/AI term mis-flagged as formula"——只列词上报，不自动改。
+**ML/AI 术语提示保留（detect）**：`_ML_LIKE_RE` 对仍裸漏的可疑 token（如 `GPT2`）提示"possible ML/AI term (left bare by periodic-table validation)……wrap manually only if it is a real formula"——只列词上报，不自动改。
 
-**化学机会提示（verifier 侧，替代 v1 的 doc_profile_hint）**：默认集跑完后，若正文区（text 段）通过周期表校验的**不同**公式形态 token ≥3 个，折叠成一条提示：措辞按化学上下文词（溶液/反应/材料/化学/mol/L/XRD/SEM/TEM/chemical/reaction——封闭小表）命中与否分两档（"likely a chemistry document" / 中性措辞）。chem_formula 被显式选中时不出此提示（已由 fixer 本体处理）。
+**化学机会提示（verifier 侧，替代 v1 的 doc_profile_hint）**：默认集跑完后，若正文区（text 段）通过周期表校验的**不同**公式形态 token ≥3 个，折叠成一条提示：措辞按化学上下文证据（封闭正则小表：中文词"溶液/反应/材料/化学"、短语 `mol/L`、缩写 XRD/SEM/TEM、英文词 `\bchemical\b`/`\breaction\b`；不能用裸 `"L"` 或 `"mol"` 子串——前者会被任何 LLM 文档平凡命中，后者命中 "molecular"）命中与否分两档（"likely a chemistry document" / 中性措辞）。chem_formula 被显式选中时不出此提示（已由 fixer 本体处理）。
 
 ### 4.3 math_delim
 

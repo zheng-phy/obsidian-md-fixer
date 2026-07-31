@@ -96,3 +96,15 @@ def test_no_images_dir_silent(tmp_path):
     md.write_text("# T\n![f](images/a.png)\nFigure 1: x\n", encoding="utf-8")
     problems = detect(md)  # images/ 不存在,静默跳过
     assert not any("unreferenced" in p.message for p in problems)
+
+
+def test_unreferenced_audit_follows_reference_dir(tmp_path):
+    """自定义输出目录时(引用指向 Image/),审计必须扫 Image/ 而非 images/。"""
+    md = tmp_path / "p.md"
+    md.write_text("# T\n![f](Image/a.png)\nFigure 1: x\n", encoding="utf-8")
+    bundle = tmp_path / "Image"
+    bundle.mkdir()
+    (bundle / "a.png").write_bytes(b"x")
+    (bundle / "extra.png").write_bytes(b"x")
+    problems = detect(md)
+    assert any("extra.png" in p.message for p in problems)

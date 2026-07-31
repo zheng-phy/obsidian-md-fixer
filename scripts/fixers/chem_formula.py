@@ -127,8 +127,8 @@ def detect(text: str) -> list:
                     problems.append(Issue(
                         "chem_formula",
                         base_line + seg[: m.start()].count("\n"),
-                        f"possible ML/AI term mis-flagged as formula: {token} "
-                        "(review; consider --skip chem_formula)",
+                        f"possible ML/AI term (left bare by periodic-table validation): {token} "
+                        "(review; wrap manually only if it is a real formula)",
                     ))
         pos += len(seg)
     return problems

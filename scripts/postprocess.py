@@ -133,7 +133,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Fix a Markdown file for Obsidian rendering.")
     parser.add_argument("input", type=Path, help="a .md file to fix")
     parser.add_argument("--fixers", default=None,
-                        help="comma-separated fixer ids to run (default: all)")
+                        help="comma-separated fixer ids to run (default: all default-on fixers; chem_formula is opt-in)")
     parser.add_argument("--skip", default=None,
                         help="comma-separated fixer ids to skip")
     parser.add_argument("--images-dir", type=Path, default=None,

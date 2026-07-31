@@ -1,8 +1,11 @@
 """Deterministic OCR-noise cleanup (class A only).
 
 Fixes only patterns that are unambiguous and cannot misfire: letter-spaces inside
-whitelisted LaTeX commands, f^{\\backslash *} -> f^{*}, split digits (math only),
-and HTML entities. Semantic-class issues (Greek-letter ?? placeholders) are
+whitelisted LaTeX commands, f^{\\backslash *} variants -> f^{*}, split digits
+(math only), HTML entities (text AND math), 5+ letter-runs in math (split words
+like "a l l o w e d"), and the closed ff-ligature misspelling dictionary.
+Semantic-class issues (Greek ?? placeholders, tuple-like sub/superscripts such
+as X_{1 16}, 3-4 letter-runs, U+FFFD replacement chars, C0 control chars) are
 reported by detect() but never auto-fixed.
 """
 
