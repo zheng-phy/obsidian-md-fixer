@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.fixers.ocr_cleanup import fix, detect
 
 
@@ -132,3 +134,56 @@ def test_detect_fffd_skipped_in_code_fence():
     problems = detect(text)
     hits = [p for p in problems if "U+FFFD" in p.message]
     assert len(hits) == 1 and hits[0].line == 4  # 只有正文行 4,code 段内不报
+
+
+@pytest.mark.parametrize(
+    "bad,good",
+    [
+        ("dificult", "difficult"),
+        ("dificulty", "difficulty"),
+        ("dificulties", "difficulties"),
+        ("efect", "effect"),
+        ("efective", "effective"),
+        ("efectively", "effectively"),
+        ("efectiveness", "effectiveness"),
+        ("eficiency", "efficiency"),
+        ("eficient", "efficient"),
+        ("ofline", "offline"),
+        ("ofers", "offers"),
+        ("ofer", "offer"),
+        ("ofce", "office"),
+        ("diferent", "different"),
+        ("diference", "difference"),
+        ("efort", "effort"),
+        ("aect", "affect"),
+        ("afected", "affected"),
+        ("eect", "effect"),
+        ("specication", "specification"),
+        ("conguration", "configuration"),
+        ("proling", "profiling"),
+    ],
+)
+def test_ligature_dict_entries(bad, good):
+    assert fix(f"the {bad} here") == f"the {good} here"
+
+
+def test_ligature_correct_word_untouched():
+    assert fix("very effective offline profiling") == "very effective offline profiling"
+
+
+def test_ligature_capitalized_untouched():
+    # 仅全小写匹配:Dificult 不碰
+    assert fix("Dificult to say") == "Dificult to say"
+
+
+def test_ligature_not_in_code_fence():
+    assert fix("```\ndificult\n```") == "```\ndificult\n```"
+
+
+def test_ligature_not_in_math():
+    assert fix("$dificult$") == "$dificult$"
+
+
+def test_ligature_word_boundary_respected():
+    # efecitve 的变体不在词典内;"effect" 内嵌 "eect"?无。词界保证不误伤子串
+    assert fix("an effect of x") == "an effect of x"

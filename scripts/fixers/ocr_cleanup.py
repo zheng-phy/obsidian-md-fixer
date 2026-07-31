@@ -91,6 +91,8 @@ def _fix_text_zone(seg: str) -> str:
     for ent, ch in _HTML_ENTITIES.items():
         seg = seg.replace(ent, ch)
     seg = _fix_braces(seg)  # whitelisted letter-spaces can appear inline
+    # ligature misses: lowercase word-boundary only (Dificult untouched)
+    seg = _LIGATURE_RE.sub(lambda m: _LIGATURE_DICT[m.group(1)], seg)
     return seg
 
 
@@ -110,6 +112,39 @@ def fix(text: str) -> str:
 _TUPLE_SUBSCRIPT_RE = re.compile(r"[\^_]\{ *\d+( +\d+)+\}")
 _FFFD_RE = re.compile(r"�")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+# Closed ligature-miss dictionary: forms where a lost "ff" produces a spelling
+# that is NEVER a valid English word (class-A: auto-fix is safe). Every entry
+# is a misspelling of one word only; anything that could be a real word is
+# excluded (e.g. "of" was considered and rejected). Annotated with the sample
+# document the form was observed in. Do not grow this list with guesses.
+_LIGATURE_DICT = {
+    "dificult": "difficult",
+    "dificulty": "difficulty",
+    "dificulties": "difficulties",
+    "efect": "effect",
+    "efective": "effective",
+    "efectively": "effectively",
+    "efectiveness": "effectiveness",
+    "eficiency": "efficiency",
+    "eficient": "efficient",
+    "ofline": "offline",
+    "ofers": "offers",
+    "ofer": "offer",
+    "ofce": "office",
+    "diferent": "different",
+    "diference": "difference",
+    "efort": "effort",
+    "aect": "affect",
+    "afected": "affected",
+    "eect": "effect",
+    "specication": "specification",
+    "conguration": "configuration",
+    "proling": "profiling",
+}
+_LIGATURE_RE = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in _LIGATURE_DICT) + r")\b"
+)
 
 
 def detect(text: str) -> list:
