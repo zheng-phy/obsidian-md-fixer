@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Fix Markdown converted from PDF/Word so tables, formulas, and images render correctly in Obsidian.",
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "plugins": [
     {
