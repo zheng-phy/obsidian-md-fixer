@@ -53,19 +53,31 @@ def _looks_like_ml_term(token: str) -> bool:
 
 
 def detect(text: str) -> list:
-    """Report each line still containing a bare chemical formula."""
+    """Report each line still containing a bare chemical formula.
+
+    Scans the whole document by zone (only 'text' segments), so fenced code is
+    never reported. Line numbers are translated from each segment's offset in
+    the original text.
+    """
     from scripts.fixers.base import Issue
 
     problems: list = []
-    for i, ln in enumerate(text.splitlines(), 1):
-        for f in find_unfixed_formulas(ln):
-            message = (
-                f"possible ML/AI term mis-flagged as formula: {f} "
-                "(review; consider --skip chem_formula)"
-                if _looks_like_ml_term(f)
-                else f"possible unfixed formula: {f}"
-            )
-            problems.append(Issue("chem_formula", i, message))
+    pos = 0
+    for kind, seg in split_zones(text):
+        if kind == "text":
+            base_line = text[:pos].count("\n") + 1
+            for m in _FORMULA_RE.finditer(seg):
+                token = m.group(0)
+                if _ACRONYM_RE.fullmatch(token):
+                    continue
+                message = (
+                    f"possible ML/AI term mis-flagged as formula: {token} "
+                    "(review; consider --skip chem_formula)"
+                    if _looks_like_ml_term(token)
+                    else f"possible unfixed formula: {token}"
+                )
+                problems.append(Issue("chem_formula", base_line + seg[: m.start()].count("\n"), message))
+        pos += len(seg)
     return problems
 
 

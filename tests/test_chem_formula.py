@@ -42,3 +42,23 @@ def test_detect_reports_line():
 
 def test_find_unfixed_formulas():
     assert "SiO2" in find_unfixed_formulas("The support is SiO2.")
+
+
+def test_detect_skips_fenced_code():
+    # fenced 代码内 M1/M2 不再报(B157 误报根因)
+    text = "```python\nM1 = M2\nprint(M1)\n```\n正文 SiO2"
+    problems = detect(text)
+    assert not any("M1" in p.message or "M2" in p.message for p in problems)
+    assert any("SiO2" in p.message for p in problems)
+
+
+def test_detect_line_number_across_zones():
+    # 行号按各段在原文中的偏移换算,跨 math 段仍准确
+    text = "line1\n$$x=1$$\nline3 SiO2"
+    problems = detect(text)
+    assert any(p.line == 3 for p in problems)
+
+
+def test_detect_ml_term_hint_in_text():
+    problems = detect("GPT2 is a model.")
+    assert any("ML/AI" in p.message for p in problems)
