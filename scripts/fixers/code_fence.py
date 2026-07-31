@@ -18,6 +18,8 @@ _ANCHOR_RE = re.compile(
 _CJK_RE = re.compile(r"[一-鿿]")
 _MATH_RE = re.compile(r"\$")
 _MIN_BLOCK = 2  # need at least this many consecutive anchor lines to wrap
+# Fence marker: opening (```lang) and closing (```) both match.
+_FENCE_RE = re.compile(r"^```\s*\w*$")
 
 
 def _is_anchor(line: str) -> bool:
@@ -27,6 +29,30 @@ def _is_anchor(line: str) -> bool:
 def _is_clean_code_line(line: str) -> bool:
     """A line confidently inside code: no CJK prose, no inline math."""
     return bool(line.strip()) and not _CJK_RE.search(line) and not _MATH_RE.search(line)
+
+
+def _split_fence_runs(lines: list) -> list:
+    """Split lines into (in_fence: bool, run: list[str]) runs.
+
+    A fence marker line (^```lang$ or ^```$ — both matched by _FENCE_RE) toggles
+    the fence state and belongs to the fence run. An unclosed fence keeps every
+    line after it fenced (conservative: never auto-close, never re-open).
+    """
+    runs: list = []
+    in_fence = False
+    run: list = []
+    for ln in lines:
+        if _FENCE_RE.match(ln):
+            if run:
+                runs.append((in_fence, run))
+                run = []
+            in_fence = not in_fence
+            run.append(ln)  # marker line itself belongs to the fence run
+        else:
+            run.append(ln)
+    if run:
+        runs.append((in_fence, run))
+    return runs
 
 
 def _find_block(lines: list, start: int) -> int:
@@ -46,28 +72,43 @@ def _find_block(lines: list, start: int) -> int:
 
 
 def fix(text: str) -> str:
-    """Wrap high-confidence code blocks; ambiguous regions are left untouched."""
-    lines = text.splitlines()
+    """Wrap high-confidence code blocks; ambiguous regions are left untouched.
+
+    Existing fence blocks pass through verbatim — only unfenced runs are scanned.
+    """
     out: list = []
-    i = 0
-    while i < len(lines):
-        end = _find_block(lines, i)
-        if end > i:
-            out.append("```python")
-            out.extend(lines[i:end])
-            out.append("```")
-            i = end
-        else:
-            out.append(lines[i])
-            i += 1
+    for in_fence, run in _split_fence_runs(text.split("\n")):
+        if in_fence:
+            out.extend(run)
+            continue
+        i = 0
+        while i < len(run):
+            end = _find_block(run, i)
+            if end > i:
+                out.append("```python")
+                out.extend(run[i:end])
+                out.append("```")
+                i = end
+            else:
+                out.append(run[i])
+                i += 1
     return "\n".join(out)
 
 
 def detect(text: str) -> list:
-    """Report suspected code blocks needing agent review (with line number)."""
+    """Report suspected code blocks needing agent review (with line number).
+
+    Anchors inside an existing fence are never reported (fenced code is by
+    definition already handled) — keeps fix/detect self-consistent.
+    """
     problems = []
-    lines = text.splitlines()
-    for i, ln in enumerate(lines, 1):
-        if _is_anchor(ln):
-            problems.append(Issue("code_fence", i, f"suspected code block (needs agent review): {ln.strip()[:40]}"))
+    lineno = 0
+    for in_fence, run in _split_fence_runs(text.split("\n")):
+        if in_fence:
+            lineno += len(run)
+            continue
+        for ln in run:
+            lineno += 1
+            if _is_anchor(ln):
+                problems.append(Issue("code_fence", lineno, f"suspected code block (needs agent review): {ln.strip()[:40]}"))
     return problems
