@@ -15,6 +15,7 @@ class _TableParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.rows: list[list[str]] = []
+        self.has_span = False
         self._current_row: list[str] | None = None
         self._current_cell: list[str] | None = None
 
@@ -22,6 +23,11 @@ class _TableParser(HTMLParser):
         if tag == "tr":
             self._current_row = []
         elif tag in ("td", "th") and self._current_row is not None:
+            attributes = dict(attrs)
+            if attributes.get("rowspan") not in (None, "1") or attributes.get(
+                "colspan"
+            ) not in (None, "1"):
+                self.has_span = True
             self._current_cell = []
 
     def handle_endtag(self, tag):
@@ -58,6 +64,8 @@ def convert_html_tables(markdown_text: str) -> str:
     def _replace(match: re.Match) -> str:
         parser = _TableParser()
         parser.feed(match.group(0))
+        if parser.has_span:
+            return match.group(0)
         return _render_markdown_table(parser.rows)
 
     return _TABLE_RE.sub(_replace, markdown_text)
@@ -70,11 +78,25 @@ def detect(text: str) -> list:
     """Report each line still containing an HTML <table> tag."""
     from scripts.fixers.base import Issue
 
-    return [
-        Issue("table", i, "unconverted HTML <table>")
-        for i, ln in enumerate(text.splitlines(), 1)
-        if _TABLE_DETECT_RE.search(ln)
-    ]
+    problems = []
+    table_blocks = list(_TABLE_RE.finditer(text))
+    for table in table_blocks:
+        line = text[: table.start()].count("\n") + 1
+        parser = _TableParser()
+        parser.feed(table.group(0))
+        message = (
+            "table with merged cells kept as HTML (needs agent)"
+            if parser.has_span
+            else "unconverted HTML <table>"
+        )
+        problems.append(Issue("table", line, message))
+
+    for line, text_line in enumerate(text.splitlines(), 1):
+        for match in _TABLE_DETECT_RE.finditer(text_line):
+            position = sum(len(previous) + 1 for previous in text.splitlines()[: line - 1]) + match.start()
+            if not any(table.start() <= position < table.end() for table in table_blocks):
+                problems.append(Issue("table", line, "unconverted HTML <table>"))
+    return problems
 
 
 def _cli(argv=None) -> int:
