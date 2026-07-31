@@ -52,6 +52,33 @@ def _chem_opportunity(text: str) -> Issue | None:
     return Issue("verifier", 0, msg)
 
 
+# Residual-risk net for chem_formula: a wrap like $V_3$ / $K_3$ (single element
+# letter + bare digit subscript) could just as well be a variable subscript
+# (V_3 = version 3, K_3 = graph constant). The periodic-table gate cannot
+# reject these, so when chem_formula ran they are flagged for agent review —
+# small count by construction, never a flood.
+_LOW_CONFIDENCE_WRAP_RE = re.compile(r"^\$([A-Z][a-z]?)_\d+\$$")
+
+
+def _low_confidence_wraps(text: str) -> list:
+    """Report single-element wraps in math zones (run only with chem_formula)."""
+    problems: list = []
+    pos = 0
+    for kind, seg in split_zones(text):
+        if kind == "math":
+            m = _LOW_CONFIDENCE_WRAP_RE.match(seg)
+            if m:
+                line = text[:pos].count("\n") + 1
+                problems.append(Issue(
+                    "chem_formula",
+                    line,
+                    f"low-confidence wrap: {m.group(0)} — verify formula vs "
+                    "name/label (single element + digits)",
+                ))
+        pos += len(seg)
+    return problems
+
+
 def _check_dollar_balance(text: str) -> list[str]:
     """Report unpaired $ / $$ delimiters with their first unpaired line."""
     problems: list[str] = []
@@ -84,6 +111,8 @@ def verify_issues(md_path: Path, fixer_ids: list | None = None) -> list:
         opportunity = _chem_opportunity(text)
         if opportunity:
             issues.insert(0, opportunity)
+    else:
+        issues += _low_confidence_wraps(text)
     return issues
 
 

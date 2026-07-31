@@ -51,3 +51,33 @@ def test_chem_opportunity_shown_on_default_set_but_not_when_chem_selected(tmp_pa
     # 显式选中 chem_formula:提示消失(已由 fixer 本体处理)
     chem_issues = verify_issues(md, ["chem_formula"])
     assert not any("formula-like" in i.message for i in chem_issues)
+
+
+def test_low_confidence_wrap_reported(tmp_path):
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text("关于 $V_3$ 和 $K_3$ 的讨论", encoding="utf-8")
+    issues = verify_issues(md, ["chem_formula"])
+    low = [i for i in issues if "low-confidence" in i.message]
+    assert len(low) == 2
+    assert any("$V_3$" in i.message for i in low)
+    assert any("$K_3$" in i.message for i in low)
+
+
+def test_low_confidence_wrap_not_reported_for_real_formulas(tmp_path):
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text("$SiO_2$ 与 $C_{6}H_{12}O_{6}$ 正常", encoding="utf-8")
+    issues = verify_issues(md, ["chem_formula"])
+    assert not any("low-confidence" in i.message for i in issues)
+
+
+def test_low_confidence_wrap_not_run_without_chem(tmp_path):
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text("关于 $V_3$ 的讨论", encoding="utf-8")
+    issues = verify_issues(md, ["table"])  # chem 未选中 -> 不运行
+    assert not any("low-confidence" in i.message for i in issues)
