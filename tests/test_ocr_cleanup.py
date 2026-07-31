@@ -85,3 +85,25 @@ def test_detect_no_tuple_on_single_digit():
     problems = detect("$X_{1 16}$ 正常 $Z_{1}$")
     hits = [p for p in problems if "space-separated numbers" in p.message]
     assert len(hits) == 1  # 只有 X_{1 16} 报
+
+
+def test_letter_run_5_merged_in_math():
+    # B196:a l l o w e d -> allowed
+    assert fix("$a l l o w e d$") == "$allowed$"
+
+
+def test_letter_run_2_left_alone():
+    # x y 变量对常见,2 字母并跑不动
+    assert fix("$x y$") == "$x y$"
+
+
+def test_letter_run_3_4_reported_not_fixed():
+    text = "$a b c$"
+    assert fix(text) == text
+    problems = detect(text)
+    assert any("letter-run" in p.message for p in problems)
+
+
+def test_letter_run_detect_skips_five_plus():
+    # 5+ 由 fix 合并,detect 不报(3-4 才报)
+    assert not any("letter-run" in p.message for p in detect("$a b c d e$"))

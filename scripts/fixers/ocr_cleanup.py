@@ -58,6 +58,12 @@ def _fix_braces(text: str) -> str:
 # Possible tuple in sub/superscript (X_{1 16}): stash it before the global
 # digit-space merges below so it is never silently merged (B196).
 _TUPLE_SUBSCRIPT_STASH_RE = re.compile(r"[\^_]\s*\{ *\d+( +\d+)+ *\}")
+# Letter runs of 5+ single letters in math (a l l o w e d -> allowed, B196).
+# 2-letter runs (x y) are variable pairs and stay; 3-4 are detect-only.
+_LETTER_RUN5_RE = re.compile(r"\b[A-Za-z](?:\s+[A-Za-z]){4,}\b")
+# Full maximal run (greedy, non-overlapping finditer makes this the whole
+# run); the 3-4 letter case is decided by counting the spaces afterwards.
+_LETTER_RUN_DETECT_RE = re.compile(r"\b[A-Za-z](?:\s+[A-Za-z])+\b")
 
 
 def _fix_math(seg: str) -> str:
@@ -73,6 +79,7 @@ def _fix_math(seg: str) -> str:
     seg = re.sub(r"\s+(?=[\^_])", "", seg)  # "10 ^{-4}" -> "10^{-4}"
     seg = _SIGN_DIGIT_SPACE_RE.sub("", seg)
     seg = _DIGIT_SPACE_RE.sub("", seg)  # split digits; only safe inside math
+    seg = _LETTER_RUN5_RE.sub(lambda m: re.sub(r"\s+", "", m.group(0)), seg)  # split words
     for ent, ch in _HTML_ENTITIES.items():  # math zones get entities too (B157)
         seg = seg.replace(ent, ch)
     for i, orig in enumerate(saved):
@@ -117,6 +124,13 @@ def detect(text: str) -> list:
                     "space-separated numbers in sub/superscript "
                     "(possible tuple, e.g. X_{1,16}) — review",
                 ))
+            for m in _LETTER_RUN_DETECT_RE.finditer(seg):
+                if 2 <= m.group(0).count(" ") <= 3:  # exactly 3-4 letters
+                    problems.append(Issue(
+                        "ocr_cleanup",
+                        base_line + seg[: m.start()].count("\n"),
+                        "letter-run in math (possible split word) — review",
+                    ))
         pos += len(seg)
     for i, ln in enumerate(text.splitlines(), 1):
         if _GREEK_PLACEHOLDER_RE.search(ln):
