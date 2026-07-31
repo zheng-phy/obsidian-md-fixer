@@ -118,12 +118,19 @@ verifier 聚合各 fixer.detect → 带行号 Issue 清单(洪峰折叠)
 
 HTML `<table>` → Markdown 管道表格（stdlib HTMLParser，首行作表头）。单元格内 `$...$` 公式原样保留。detect：逐行报残留 `<table>`。
 
+**合并单元格（rowspan/colspan)——不静默误改**：Markdown 表格不支持合并单元格。`_TableParser` 检测到任一 `<td>/<th>` 带 `rowspan` 或 `colspan` 时，**不转换该表**，保留原 HTML 并报 detect 警告（带行号）。告警后由 Agent 按"三档框架"修复（见 §6.3 Workflow):
+1. **展平表头**（首选）：多级表头合并为单行复合列名，跨行单元格向下复制填充——信息无损时优先
+2. **拆成多个表**：按主表头拆成几个独立单层表——展平后列名过冗时用
+3. **保留 HTML + 注明**（兜底）：无法无损转换时留 HTML，上方注明"本表含合并单元格，建议查看原 PDF"
+Agent 在框架内按文义选档，不发明其他转法。
+
 ### 4.2 chem_formula
 
 化学式加下标：`SiO2`→`$SiO_2$`、`C6H12O6`→`$C_6H_12O_6$`。判定是**排版模式匹配**（两个元素符号单元，或单元素+数字，词边界锚定），全大写缩写（XRD/SEM）排除。只在 `text` 段操作。
 
 - **适用**：化学/材料类论文。**不适用**：物理/数模文档（`Sv2` 实为 `$Sv^2$`，加下标即误伤）。
 - **文档画像（detect 增强）**:verify 报告开头加画像提示——若 `$$`/`\tag` 密度高且无化学式特征，提示"疑似数学/数模文档，建议 `--skip chem_formula`"。**只提示，不自动 skip**（半自动）。
+- **ML/AI 术语误伤上报（detect)**：化学式模式会误伤 ML 术语（`GPT2`→`$GPT_2$`、`MoE`/`LoRA`/`FLOPs` 加 `$`)。不做白名单（会膨胀）、不做画像（过拟合）——detect 列出疑似误伤的术语（大写混合缩写被加 `$` 的），上报 Agent 判断是否 `--skip chem_formula` 或逐个还原。只列词上报，不自动改。
 - 已知局限（沿袭，未改）：多位数下标 `H12` → `$C_6H_12O_6$`(`_` 只对下一字符生效）。
 
 ### 4.3 math_delim
@@ -135,6 +142,10 @@ HTML `<table>` → Markdown 管道表格（stdlib HTMLParser，首行作表头�
 - `\tag` 缺陷 detect:`\tag{...}` 内括号不配平、混入游离括号、裸 `~`（数学模式下渲染为空格，公式编号区间误拼）
 
 只在 `text`/`eq` 段操作，不触碰已有 `$...$` 数学内容。
+
+**`$` 配对检查（verifier 侧）的两个修正**:
+- **转义美元符号 `\$` 跳过**：金额写法 `\$2.03` 不计入 `$` 配对——扫描时排除被反斜杠转义的 `\$`，不再误报"Unpaired $ delimiters"。
+- **未配对告警带行号**：记录首个未配对 `$`/`$$` 的行号与上下文，以统一 Issue 格式输出（此前只报"Unpaired $ delimiters"无位置）。
 
 ### 4.4 ocr_cleanup(A 类确定性 OCR 噪音）
 
@@ -178,6 +189,7 @@ MinerU 偶尔把代码段降级为普通文本（缺 ``` 围栏，如 `import nu
 - 图源目录是参数（`organize(md_path, source_images_dir)`)，可用 `--images-dir` 指定（如 MinerU 图包位置）。
 - **边界**：只能修"引用路径"，不能恢复图片本体缺失。图片缺失时 verifier 报告并引导用户用能导图的转换器（如 MinerU Standard API）重转。
 - detect：报缺失图片（带行号）。
+- **图文分离 detect**：MinerU 偶尔把图片与图注错序（如首页大图被放在文档标题之前，图注却在正文）。detect 检查机械信号——图片引用出现在第一个 `#` 标题**之前**——上报 Agent（不自动挪位，正确位置需读懂论文结构）。Agent 拿到提示后按文义把图片引用移到对应图注旁。
 
 ## 5. 缺陷画像（实证）与修复归属
 
@@ -266,11 +278,21 @@ python -m scripts.postprocess paper.md --in-place
 # 只校验不修改(语义修复后验证;0=干净,2=仍有 issue,不写文件)
 python -m scripts.postprocess paper.md --verify
 
+# 预览修改量(跑修复器但不写文件,报告每个 fixer 会改几处;大文件先评估)
+python -m scripts.postprocess paper.md --dry-run
+
+# 结构化 issue 输出(修复/校验后写 issues.json,供 Agent 可靠逐条处理)
+python -m scripts.postprocess paper.md --issues-json issues.json
+
 # 单独跑一个修复器
 python -m scripts.fixers.table paper.md
 ```
 
 **退出码**:`0` 成功；`1` 失败（无产物）;`2` 成功但验证有警告（产物已生成，带行号 issue 打印到 stderr，洪峰折叠，末尾打印 re-run 提示）。
+
+**`--dry-run`**：跑全部选中修复器但**不写任何文件**，报告每个修复器会改动的处数与 detect 的 issue 数；用于大文件修复前预览影响面。
+
+**`--issues-json <路径>`**：把 verifier 的结构化 Issue 列表（`[{fixer, line, message}]`）写入指定 JSON 文件，供 Agent 逐条可靠处理（替代解析 stderr 字符串）。
 
 ## 9. 测试与开发流程
 
