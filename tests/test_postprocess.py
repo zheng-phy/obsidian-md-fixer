@@ -68,7 +68,7 @@ def test_images_dir_used(tmp_path):
     src.mkdir()
     (src / "a.png").write_bytes(b"x")
     md = tmp_path / "p.md"
-    md.write_text("![f](images/a.png)", encoding="utf-8")
+    md.write_text("![f](images/a.png)\nFigure 1: ok\n", encoding="utf-8")
     code = main([str(md), "--images-dir", str(src)])
     assert (tmp_path / "images" / "a.png").exists()
     assert code == 0

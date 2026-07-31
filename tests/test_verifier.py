@@ -6,7 +6,7 @@ def test_clean_file_passes(tmp_path):
     images.mkdir()
     (images / "a.png").write_bytes(b"x")
     md = tmp_path / "ok.md"
-    md.write_text("text $SiO_2$ and $$E=mc^2$$\n\n![f](images/a.png)", encoding="utf-8")
+    md.write_text("text $SiO_2$ and $$E=mc^2$$\n\n![f](images/a.png)\nFigure 1: ok\n", encoding="utf-8")
 
     assert verify(md) == []
 
