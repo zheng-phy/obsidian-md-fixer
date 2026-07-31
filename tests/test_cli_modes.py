@@ -49,3 +49,33 @@ def test_skip_chem_formula_is_harmless_noop(tmp_path):
     assert main([str(md), "--skip", "chem_formula"]) == 0
     content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
     assert "$" not in content
+
+
+def test_images_out_dir_used(tmp_path):
+    src = tmp_path / "ext"
+    src.mkdir()
+    (src / "a.png").write_bytes(b"x")
+    md = tmp_path / "p.md"
+    md.write_text("![f](old/a.png)\nFigure 1: ok\n", encoding="utf-8")
+    code = main([str(md), "--images-dir", str(src), "--images-out-dir", "Image"])
+    assert (tmp_path / "Image" / "a.png").exists()
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "![f](Image/a.png)" in content
+    assert code == 0
+
+
+def test_fix_summary_printed(tmp_path, capsys):
+    md = tmp_path / "p.md"
+    md.write_text("<table><tr><td>x</td></tr></table>\n", encoding="utf-8")
+    assert main([str(md)]) == 0
+    out = capsys.readouterr().out
+    assert "[table] applied" in out
+
+
+def test_fix_summary_no_change_printed(tmp_path, capsys):
+    # exit 0 也打印摘要,消除"零差异报成功"的误导
+    md = tmp_path / "p.md"
+    md.write_text("plain text", encoding="utf-8")
+    assert main([str(md)]) == 0
+    out = capsys.readouterr().out
+    assert "[table] no change" in out

@@ -73,26 +73,46 @@ def _format_issues(issues: list) -> list:
     return out
 
 
-def process_markdown(md_path: Path, images_source_dir: Path | None, fixer_ids: list) -> list:
-    """Run selected fixers in default order, then aggregate detect(). Returns problems."""
+def process_markdown(
+    md_path: Path,
+    images_source_dir: Path | None,
+    fixer_ids: list,
+    images_out_dir: str = "images",
+) -> tuple:
+    """Run selected fixers in default order, then aggregate detect().
+
+    Returns (problems, per-fixer change summary lines).
+    """
     md_path = Path(md_path)
     chosen = select(fixer_ids)
 
     text, newline = read_text_preserve(md_path)
+    changes: list = []
     for fixer in chosen:
         if not fixer.file_based:
+            before = text
             text = fixer.run(text)
+            changes.append(f"[{fixer.id}] {'applied' if text != before else 'no change'}")
     write_text_preserve(md_path, text, newline)
 
     for fixer in chosen:
         if fixer.file_based:
+            before, _ = read_text_preserve(md_path)
             src = images_source_dir if images_source_dir is not None else md_path.parent / "images"
-            fixer.run(md_path, src)
+            fixer.run(md_path, src, images_out_dir)
+            after, _ = read_text_preserve(md_path)
+            changes.append(f"[{fixer.id}] {'applied' if after != before else 'no change'}")
 
-    return verifier.verify_issues(md_path, fixer_ids)
+    return verifier.verify_issues(md_path, fixer_ids), changes
 
 
-def _run_fix_mode(input_path: Path, in_place: bool, fixer_ids: list, images_dir: Path | None) -> tuple:
+def _run_fix_mode(
+    input_path: Path,
+    in_place: bool,
+    fixer_ids: list,
+    images_dir: Path | None,
+    images_out_dir: str = "images",
+) -> tuple:
     """Fix an existing .md. Default writes <stem>_fixed.md; --in-place overwrites with .bak backup."""
     if in_place:
         target = input_path
@@ -101,7 +121,10 @@ def _run_fix_mode(input_path: Path, in_place: bool, fixer_ids: list, images_dir:
         target = input_path.with_name(input_path.stem + "_fixed.md")
         shutil.copy2(input_path, target)
     src = images_dir if images_dir is not None else input_path.parent / "images"
-    problems = process_markdown(target, src, fixer_ids)
+    problems, changes = process_markdown(target, src, fixer_ids, images_out_dir)
+    print("Fix summary:")
+    for line in changes:
+        print(f"  {line}")
     return target, problems
 
 
@@ -115,6 +138,8 @@ def main(argv=None) -> int:
                         help="comma-separated fixer ids to skip")
     parser.add_argument("--images-dir", type=Path, default=None,
                         help="source directory for images (default: <md_dir>/images)")
+    parser.add_argument("--images-out-dir", default="images",
+                        help="target directory name for copied images, relative to the md (default: images)")
     parser.add_argument("--in-place", action="store_true",
                         help="overwrite the input file (a .bak backup is created)")
     parser.add_argument("--verify", action="store_true",
@@ -162,7 +187,7 @@ def main(argv=None) -> int:
             )
         return 0
 
-    target, problems = _run_fix_mode(args.input, args.in_place, fixer_ids, args.images_dir)
+    target, problems = _run_fix_mode(args.input, args.in_place, fixer_ids, args.images_dir, args.images_out_dir)
     if args.issues_json:
         _write_issues_json(args.issues_json, problems)
     print(f"Re-run: python -m scripts.postprocess {_rerun_args(args)}")
@@ -187,6 +212,8 @@ def _rerun_args(args) -> str:
         parts += ["--skip", args.skip]
     if args.images_dir:
         parts += ["--images-dir", f'"{args.images_dir}"']
+    if args.images_out_dir != "images":
+        parts += ["--images-out-dir", f'"{args.images_out_dir}"']
     if args.in_place:
         parts.append("--in-place")
     if args.issues_json:

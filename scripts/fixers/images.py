@@ -22,11 +22,15 @@ _CAPTION_CN_MAX_LEN = 40  # longer lines are prose mentions, not captions
 _AXIS_HEADING_RE = re.compile(r"^#{1,6}\s*\S{1,12}/(元|秒|米|千克|个|件|%|kg|cm|mm|m|s)$")
 
 
-def organize(md_path: Path, source_images_dir: Path) -> None:
-    """Copy images from source dir into <md_dir>/images/ and fix paths in the .md."""
+def organize(md_path: Path, source_images_dir: Path, out_dir_name: str = "images") -> None:
+    """Copy images from source dir into <md_dir>/<out_dir_name>/ and fix paths.
+
+    out_dir_name is relative to the md (default "images"; K3 parses need
+    "Image/"), and the reference rewrite uses the same name.
+    """
     md_path = Path(md_path)
     source_images_dir = Path(source_images_dir)
-    target_dir = md_path.parent / "images"
+    target_dir = md_path.parent / out_dir_name
 
     if source_images_dir.is_dir() and source_images_dir.resolve() != target_dir.resolve():
         target_dir.mkdir(exist_ok=True)
@@ -40,7 +44,7 @@ def organize(md_path: Path, source_images_dir: Path) -> None:
         alt, path = match.group(1), match.group(2)
         if path.startswith(("http://", "https://")):
             return match.group(0)
-        return f"![{alt}](images/{Path(path).name})"
+        return f"![{alt}]({out_dir_name}/{Path(path).name})"
 
     write_text_preserve(md_path, _MD_IMAGE_RE.sub(_rewrite, text), newline)
 
