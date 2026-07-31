@@ -3,12 +3,12 @@ from scripts.fixers.base import Issue, Fixer
 
 
 def test_default_order():
-    assert default_order() == ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"]
+    assert default_order() == ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]
 
 
 def test_all_fixers_registered():
     ids = {f.id for f in all_fixers()}
-    assert {"table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"} <= ids
+    assert {"table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"} <= ids
 
 
 def test_select_subset():
@@ -23,3 +23,16 @@ def test_select_preserves_default_order_not_input_order():
 
 def test_issue_str():
     assert str(Issue("table", 3, "unconverted")) == "[table] line 3: unconverted"
+
+
+def test_chem_formula_is_opt_in():
+    # v2:chem_formula 退出默认集合,但仍注册可被显式选中
+    fixers = {f.id: f for f in all_fixers()}
+    assert fixers["chem_formula"].default_on is False
+    assert fixers["table"].default_on is True
+    assert fixers["images"].default_on is True
+    assert "chem_formula" in default_order()  # _ORDER 不变
+
+
+def test_select_chem_formula_still_works():
+    assert [f.id for f in select(["chem_formula"])] == ["chem_formula"]

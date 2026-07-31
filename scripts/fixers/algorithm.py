@@ -11,9 +11,12 @@ import re
 from scripts.fixers.base import Issue
 
 _DIV_RE = re.compile(r'<div class="mineru-algorithm"[^>]*>(.*?)</div>', re.DOTALL)
+# Agent World samples added: foreach/continue/else/elif/end/define/synthesize/
+# complexify/require/ensure are anchor lines too.
 _ANCHOR_RE = re.compile(
     r"^\s*(Algorithm\s+\d+|算法\s*\d+|Input:|Output:|输入:|输出:|\d+\.\s"
-    r"|for\b|while\b|if\b|return\b|repeat\b|until\b)",
+    r"|for\b|foreach\b|while\b|if\b|elif\b|else\b|return\b|repeat\b|until\b|end\b"
+    r"|continue\b|define\b|synthesize\b|complexify\b|require\b|ensure\b)",
     re.IGNORECASE,
 )
 
@@ -25,7 +28,12 @@ def _convert_div(match: re.Match) -> str:
 
     def flush_code() -> None:
         if code_buf:
-            out.append("```\n" + "\n".join(code_buf) + "\n```")
+            if any("$" in ln for ln in code_buf):
+                # Math mixed into the pseudocode (B157): keep the whole run as
+                # prose so the formulas render; no fence.
+                out.extend(code_buf)
+            else:
+                out.append("```\n" + "\n".join(code_buf) + "\n```")
             code_buf.clear()
 
     for ln in body.splitlines():

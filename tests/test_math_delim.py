@@ -52,3 +52,33 @@ def test_detect_tag_normal_ok():
     # 正常 \tag{N} 不报
     assert detect("\\tag{1}") == []
     assert detect("\\tag{26}") == []
+
+
+def test_detect_downgraded_tilde():
+    problems = detect("模型 X\\~B(n,p) 分布")
+    hits = [p for p in problems if "downgraded" in p.message]
+    assert len(hits) == 1
+
+
+def test_detect_tilde_number_range_not_reported():
+    # 1\~8 是中文区间,数字之间的 \~ 不报
+    problems = detect("零件1\\~8 规格")
+    assert not any("downgraded" in p.message for p in problems)
+
+
+def test_detect_downgraded_inequality():
+    problems = detect("满足 0<p<1 条件")
+    hits = [p for p in problems if "downgraded" in p.message]
+    assert len(hits) == 1
+
+
+def test_detect_garbled_math_body():
+    # K3 AttnRes 案:= 1 = 1 1(定界符配平但内容损坏)
+    problems = detect("$= 1 = 1 1$ 异常")
+    hits = [p for p in problems if "garbled" in p.message]
+    assert len(hits) == 1
+
+
+def test_detect_clean_math_not_reported():
+    problems = detect("$x = y + 1$ 正常")
+    assert not any("garbled" in p.message or "downgraded" in p.message for p in problems)

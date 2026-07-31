@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.fixers.ocr_cleanup import fix, detect
 
 
@@ -38,3 +40,157 @@ def test_detect_greek_placeholder():
 
 def test_detect_clean_when_no_issue():
     assert detect("clean $0.20$ text") == []
+
+
+def test_html_entity_decoded_in_math():
+    # B157:$\tilde{\nu} &gt; 3300$
+    assert fix("$\\tilde{\\nu} &gt; 3300$") == "$\\tilde{\\nu} > 3300$"
+    assert fix("$a &lt; b$") == "$a < b$"
+
+
+def test_html_entity_in_text_still_works():
+    # text 段既有实体替换行为保持
+    assert fix("a &gt; b") == "a > b"
+
+
+def test_fstar_variants_all_fixed():
+    assert fix("$f^{\\backslash *}$") == "$f^{*}$"
+    assert fix("$f^{\\backslash^ {*}}$") == "$f^{*}$"
+
+
+def test_fstar_backslash_a_not_touched():
+    # f^{\backslash a} 不是 f-star 形态,不误伤
+    assert fix("$f^{\\backslash a}$") == "$f^{\\backslash a}$"
+
+
+def test_tuple_subscript_left_alone():
+    # B196:X_{1 16} 是两个完整整数并列(可能元组),不静默合并
+    assert fix("$X_{1 16}$") == "$X_{1 16}$"
+
+
+def test_sign_digit_subscript_still_merged():
+    assert fix("$10^{- 4}$") == "$10^{-4}$"
+
+
+def test_decimal_digit_split_still_merged():
+    assert fix("$0. 2 0$") == "$0.20$"
+
+
+def test_detect_tuple_subscript():
+    problems = detect("$X_{1 16}$ 与 $Y_{5 6}$")
+    hits = [p for p in problems if "space-separated numbers" in p.message]
+    assert len(hits) == 2
+    assert all(p.line == 1 for p in hits)
+
+
+def test_detect_no_tuple_on_single_digit():
+    problems = detect("$X_{1 16}$ 正常 $Z_{1}$")
+    hits = [p for p in problems if "space-separated numbers" in p.message]
+    assert len(hits) == 1  # 只有 X_{1 16} 报
+
+
+def test_letter_run_5_merged_in_math():
+    # B196:a l l o w e d -> allowed
+    assert fix("$a l l o w e d$") == "$allowed$"
+
+
+def test_letter_run_2_left_alone():
+    # x y 变量对常见,2 字母并跑不动
+    assert fix("$x y$") == "$x y$"
+
+
+def test_letter_run_3_4_reported_not_fixed():
+    text = "$a b c$"
+    assert fix(text) == text
+    problems = detect(text)
+    assert any("letter-run" in p.message for p in problems)
+
+
+def test_letter_run_detect_skips_five_plus():
+    # 5+ 由 fix 合并,detect 不报(3-4 才报)
+    assert not any("letter-run" in p.message for p in detect("$a b c d e$"))
+
+
+def test_detect_fffd_reported_once_per_line():
+    problems = detect("第一行\n这里有�字�符\n结尾")
+    hits = [p for p in problems if "U+FFFD" in p.message]
+    assert len(hits) == 1 and hits[0].line == 2  # 同行多处报一条
+
+
+def test_detect_fffd_once_across_zones_on_same_line():
+    # 同行跨 text/math 段仍只报一条(全文行级去重)
+    problems = detect("(�) 与 $x�y$ 同行")
+    hits = [p for p in problems if "U+FFFD" in p.message]
+    assert len(hits) == 1 and hits[0].line == 1
+
+
+def test_detect_control_char_reported():
+    problems = detect("第一行\n退格\x08字符\n结尾")
+    hits = [p for p in problems if "control char" in p.message]
+    assert len(hits) == 1 and hits[0].line == 2
+    assert "U+0008" in hits[0].message
+
+
+def test_detect_clean_text_no_char_issues():
+    problems = detect("干净文本 $x_{1}$ 正常")
+    assert not any("U+FFFD" in p.message or "control char" in p.message for p in problems)
+
+
+def test_detect_fffd_skipped_in_code_fence():
+    text = "```python\nx = '�'\n```\n正文 �"
+    problems = detect(text)
+    hits = [p for p in problems if "U+FFFD" in p.message]
+    assert len(hits) == 1 and hits[0].line == 4  # 只有正文行 4,code 段内不报
+
+
+@pytest.mark.parametrize(
+    "bad,good",
+    [
+        ("dificult", "difficult"),
+        ("dificulty", "difficulty"),
+        ("dificulties", "difficulties"),
+        ("efect", "effect"),
+        ("efective", "effective"),
+        ("efectively", "effectively"),
+        ("efectiveness", "effectiveness"),
+        ("eficiency", "efficiency"),
+        ("eficient", "efficient"),
+        ("ofline", "offline"),
+        ("ofers", "offers"),
+        ("ofer", "offer"),
+        ("ofce", "office"),
+        ("diferent", "different"),
+        ("diference", "difference"),
+        ("efort", "effort"),
+        ("aect", "affect"),
+        ("afected", "affected"),
+        ("eect", "effect"),
+        ("specication", "specification"),
+        ("conguration", "configuration"),
+        ("proling", "profiling"),
+    ],
+)
+def test_ligature_dict_entries(bad, good):
+    assert fix(f"the {bad} here") == f"the {good} here"
+
+
+def test_ligature_correct_word_untouched():
+    assert fix("very effective offline profiling") == "very effective offline profiling"
+
+
+def test_ligature_capitalized_untouched():
+    # 仅全小写匹配:Dificult 不碰
+    assert fix("Dificult to say") == "Dificult to say"
+
+
+def test_ligature_not_in_code_fence():
+    assert fix("```\ndificult\n```") == "```\ndificult\n```"
+
+
+def test_ligature_not_in_math():
+    assert fix("$dificult$") == "$dificult$"
+
+
+def test_ligature_word_boundary_respected():
+    # efecitve 的变体不在词典内;"effect" 内嵌 "eect"?无。词界保证不误伤子串
+    assert fix("an effect of x") == "an effect of x"

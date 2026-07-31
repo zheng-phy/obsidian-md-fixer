@@ -31,3 +31,17 @@ def test_external_urls_untouched(tmp_path):
     organize_images(md, tmp_path / "nonexistent")
 
     assert md.read_text(encoding="utf-8") == "![web](https://example.com/a.png)"
+
+
+def test_out_dir_name_respected(tmp_path):
+    # K3 解析需要 Image/(而非 images/)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.png").write_bytes(b"x")
+    md = tmp_path / "paper.md"
+    md.write_text("![fig](old/a.png)", encoding="utf-8")
+
+    organize_images(md, src, "Image")
+
+    assert (tmp_path / "Image" / "a.png").exists()
+    assert md.read_text(encoding="utf-8") == "![fig](Image/a.png)"

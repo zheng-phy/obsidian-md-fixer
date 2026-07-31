@@ -7,21 +7,21 @@
 
 ### 1.1 目标
 
-一个平台无关的 AI Agent skill：修复**已转换**的 Markdown（来自 MinerU、pandoc、Marker 等任意转换器）在 Obsidian 中的渲染问题。
+一个平台无关的 AI Agent skill：修复**已转换**的 Markdown（来自 MinerU、pandoc、Marker 等任意转换器）在 Obsidian 中的渲染问题。v2.0.0 起**默认面向 CS/AI/数学/物理论文深度优化**；化学式下标降为可选修复器（opt-in）。
 
 - 用确定性的 Python 修复器（fixer）完成机械修复
-- 把语义级问题（上下标、断句、OCR 误判）交给 Agent 按行号清单处理
+- 把语义级问题（上下标、断句、OCR 误判、图序）交给 Agent 按行号清单处理
 - 产出：一份修复后的 `.md` + 同级 `images/` 文件夹
 - 不硬编码任何密钥或用户路径；纯本地处理，不访问网络
 
 ### 1.2 适用场景
 
 - 转换后的 Markdown 表格渲染为原始 `<table>` HTML
-- 化学式（SiO2、C4、C6H12O6）无下标显示
-- `\(...` 定界符断裂导致 Obsidian ParseError
-- 图片路径错乱或图片缺失
-- MinerU 的 algorithm 块（`<div class="mineru-algorithm">`）未被转换
-- 确定性 OCR 噪音（`\mathrm` 字母空格、`f^{\backslash *}`、数字拆散、HTML 实体）
+- `\(...` 定界符断裂导致 Obsidian ParseError；行内公式被降级成文本（`X\~B(`、`0<p<1`）
+- 图片路径错乱、图片缺失、图与图注分离、图序错乱、图包含未引用图
+- 代码段被降级为普通文本（缺 ``` 围栏）；围栏被误标语言/碎片化；algorithm 块（`<div class="mineru-algorithm">`）未被转换
+- 确定性 OCR 噪音（`\mathrm` 字母空格、`f^{\backslash…*}`、数字拆散、HTML 实体、U+FFFD、ff 连字丢失、URL 断行）
+- （可选）化学式（SiO2、C6H12O6）无下标显示——需显式 `--fixers chem_formula`
 
 ### 1.3 不适用场景
 
@@ -31,6 +31,7 @@
 - 扫描文档 OCR
 - Markdown 中非表格 LaTeX 渲染问题（Obsidian/MathJax 问题）
 - .tex 编译错误（LaTeX 编译器问题）
+- 未适配领域的专门适配（如生物：构造上安全但无样本，YAGNI——见 §14 D5）
 
 ## 2. 架构
 
@@ -48,17 +49,19 @@ obsidian-md-fixer/
 ├── scripts/
 │   ├── __init__.py
 │   ├── postprocess.py       # 编排器/CLI 入口,驱动注册表
+│   ├── textio.py            # 换行符保留读写(CRLF/LF 逐字节还原)
 │   ├── verifier.py          # 聚合各 fixer 的 detect,输出带行号 Issue 清单
 │   └── fixers/
 │       ├── __init__.py      # 注册表:register / all_fixers / select / default_order
 │       ├── base.py          # Issue / Fixer 协议 + split_zones 共享保护区
 │       ├── table.py         # HTML 表格 → Markdown 表格
-│       ├── chem_formula.py  # 化学式下标
-│       ├── math_delim.py    # <eq>/\(...\)/$ 定界符 + \tag 缺陷
-│       ├── ocr_cleanup.py   # 确定性 OCR 噪音(A 类)
-│       ├── algorithm.py     # mineru-algorithm div 转换
-│       ├── code_fence.py    # 未包代码块的代码识别包块(高置信,模糊上报)
-│       └── images.py        # 图片复制与引用重写
+│       ├── chem_formula.py  # 化学式下标(opt-in,周期表校验)
+│       ├── math_delim.py    # <eq>/\(...\)/$ 定界符 + \tag 缺陷 + 降级/乱码 detect
+│       ├── ocr_cleanup.py   # 确定性 OCR 噪音(A 类)+ 连字词典 + U+FFFD/控制字符 detect
+│       ├── algorithm.py     # mineru-algorithm div 转换(含数学 run 转正文)
+│       ├── code_fence.py    # 未包代码块的代码识别包块(围栏感知)+ 结构 detect
+│       ├── url_join.py      # 同行断 URL 接合(跨行只报)
+│       └── images.py        # 图片复制与引用重写 + 图-图注配对/图包审计
 ├── tests/                   # pytest 单元测试(镜像 scripts 结构)
 ├── .gitignore
 ├── .gitattributes
@@ -69,12 +72,13 @@ obsidian-md-fixer/
 
 每个修复器是 `scripts/fixers/` 下的一个模块，实现统一协议：
 
-- `run`:修复函数。文本类签名为 `(text) -> text`;文件系统类（`file_based=True`，如 images）签名为 `(md_path, source_dir) -> None`
+- `run`:修复函数。文本类签名为 `(text) -> text`;文件系统类（`file_based=True`，如 images）签名为 `(md_path, source_dir, out_dir_name="images") -> None`
 - `detect`:体检函数，返回 `list[Issue]`(`Issue(fixer, line, message)`，行号供 Agent 定位）
+- `default_on`（默认 `True`）:`False` 表示 opt-in 修复器——默认流水线不跑，仅 `--fixers` 显式选中时执行（v2 起 chem_formula 为 opt-in）
 
 注册表（`fixers/__init__.py`）:
 - `register(fixer)`:新修复器 = 新文件 + 一行注册
-- `default_order()`:固定执行序 `["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"]`，新修复器显式选位，不搞拓扑排序
+- `default_order()`:固定执行序 `["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]`，新修复器显式选位，不搞拓扑排序
 - `select(ids)`:按 `default_order` 过滤出选中修复器（供 `--fixers`/`--skip`)
 - 每个修复器可独立调用：`python -m scripts.fixers.<name> <file.md>`
 
@@ -87,13 +91,13 @@ obsidian-md-fixer/
 ```
 用户输入 (任意来源的 .md)
     ↓
-python -m scripts.postprocess xx.md [--fixers a,b] [--skip c] [--images-dir PATH] [--in-place] [--verify]
+python -m scripts.postprocess xx.md [--fixers a,b] [--skip c] [--images-dir PATH] [--images-out-dir NAME] [--in-place] [--verify] [--dry-run] [--issues-json FILE]
     ↓
-按 default_order 跑选中的文本修复器(text→text,写回)
+按 default_order 跑选中的文本修复器(text→text,写回,逐 fixer 打印 applied/no change 摘要)
     ↓
-跑文件系统修复器(images,复制+重写引用)
+跑文件系统修复器(images,复制+重写引用到 --images-out-dir)
     ↓
-verifier 聚合各 fixer.detect → 带行号 Issue 清单(洪峰折叠)
+verifier 聚合各 fixer.detect → 带行号 Issue 清单(洪峰折叠;化学机会提示)
     ↓
 退出码 0/1/2;2 时 Agent 按清单做语义修复
     ↓
@@ -124,14 +128,22 @@ HTML `<table>` → Markdown 管道表格（stdlib HTMLParser，首行作表头�
 3. **保留 HTML + 注明**（兜底）：无法无损转换时留 HTML，上方注明"本表含合并单元格，建议查看原 PDF"
 Agent 在框架内按文义选档，不发明其他转法。
 
-### 4.2 chem_formula
+### 4.2 chem_formula（v2.0.0 起 opt-in）
 
-化学式加下标：`SiO2`→`$SiO_2$`、`C6H12O6`→`$C_6H_12O_6$`。判定是**排版模式匹配**（两个元素符号单元，或单元素+数字，词边界锚定），全大写缩写（XRD/SEM）排除。只在 `text` 段操作。
+化学式加下标：`SiO2`→`$SiO_{2}$`、`C6H12O6`→`$C_{6}H_{12}O_{6}$`。**自 v2.0.0 退出默认集合**（`default_on=False`）——默认流水线（CS/AI/数学/物理）不跑它，误伤面归零；化学/材料文档凭 verifier 的**化学机会提示**显式 `--fixers chem_formula` 开启。
 
-- **适用**：化学/材料类论文。**不适用**：物理/数模文档（`Sv2` 实为 `$Sv^2$`，加下标即误伤）。
-- **文档画像（detect 增强）**:verify 报告开头加画像提示——若 `$$`/`\tag` 密度高且无化学式特征，提示"疑似数学/数模文档，建议 `--skip chem_formula`"。**只提示，不自动 skip**（半自动）。
-- **ML/AI 术语误伤上报（detect)**：化学式模式会误伤 ML 术语（`GPT2`→`$GPT_2$`、`MoE`/`LoRA`/`FLOPs` 加 `$`)。不做白名单（会膨胀）、不做画像（过拟合）——detect 列出疑似误伤的术语（大写混合缩写被加 `$` 的），上报 Agent 判断是否 `--skip chem_formula` 或逐个还原。只列词上报，不自动改。
-- 已知局限（沿袭，未改）：多位数下标 `H12` → `$C_6H_12O_6$`(`_` 只对下一字符生效）。
+**判定 = 封闭集合 + 形态（D3/D4）**：token 被包下标须同时满足
+1. **周期表校验**：token 的全部字母可贪心切分为 118 元素符号（大小写敏感；单遍左到右优先 2 字母、失败回退 1 字母，不回溯——比全回溯更保守，`BRCA`=Br+Ca 类被拒）
+2. **数字必需**：至少含一个数字（无数字=无下标可加；`SiC`/`SiLU`/`XRD` 全拒）
+3. **连字符锚定**：前导字符不是连字符（`DeepSeek-V3` 不碰）
+
+效果：`GSM8K`/`MATH500`/`AIME24`/`GPT2`/`MoE`/`LoRA`/`FLOPs`/`LLMs`/`APIs`/`Sv2`/`SiC`/`BRCA1`/`IL6`/`COX2` 全拒——v1 时代 `--skip chem_formula` 的两大理由（数模/LLM 误伤）从构造上消失。周期表是物理钉死的封闭集合，永不增长——这是脚本内唯一白名单（D4）。多位数下标带花括号（修 v1 局限：`C_{6}` 而非 `C_6`）。
+
+**残余漏网 → 低置信复核网（Task 7）**：周期表也杀不掉的只有"单元素字母+纯数字下标"形（`$V_{3}$`/`$K_{3}$`/`$C_{4}$`——可能是变量下标而非化学式）。chem_formula 被选中时，verify 扫描 math 段逐条报 `low-confidence wrap`，交 Agent 对照原文判断。量小不报洪。（正则花括号可选：fixer 产出带花括号形态，手写无花括号形态同样覆盖。）
+
+**ML/AI 术语提示保留（detect）**：`_ML_LIKE_RE` 对仍裸漏的可疑 token（如 `GPT2`）提示"possible ML/AI term (left bare by periodic-table validation)……wrap manually only if it is a real formula"——只列词上报，不自动改。
+
+**化学机会提示（verifier 侧，替代 v1 的 doc_profile_hint）**：默认集跑完后，若正文区（text 段）通过周期表校验的**不同**公式形态 token ≥3 个，折叠成一条提示：措辞按化学上下文证据（封闭正则小表：中文词"溶液/反应/材料/化学"、短语 `mol/L`、缩写 XRD/SEM/TEM、英文词 `\bchemical\b`/`\breaction\b`；不能用裸 `"L"` 或 `"mol"` 子串——前者会被任何 LLM 文档平凡命中，后者命中 "molecular"）命中与否分两档（"likely a chemistry document" / 中性措辞）。chem_formula 被显式选中时不出此提示（已由 fixer 本体处理）。
 
 ### 4.3 math_delim
 
@@ -154,11 +166,14 @@ Agent 在框架内按文义选档，不发明其他转法。
 | 模式 | 规则 | 位置约束 |
 |---|---|---|
 | 白名单命令内字母空格 | `\mathrm { d r a f t }`→`\mathrm{draft}` | 白名单命令花括号内：`\mathrm \text \operatorname \mathbf \mathit \mathsf \textbf \textit` 及 `^{}` `_{}` |
-| `f^{\backslash *}` → `f^{*}` | 固定替换 | math zone |
+| `f^{\backslash…*}` 变体 → `f^{*}` | 泛化正则（覆盖 `f^{\backslash *}`、`f^{\backslash^ {*}}`；`f^{\backslash a}` 不误伤） | math zone |
 | 数字拆散（`0. 2 0`→`0.20`) | 删数字间空格 | **仅** ①`$...$` ②`$$...$$` ③白名单命令花括号内 |
-| HTML 实体（`&gt; &lt; &amp; &quot;`) | 固定映射 | 非 code zone |
+| HTML 实体（`&gt; &lt; &amp; &quot;`) | 固定映射 | text + math zone（v2 起 math 区也替换，B157） |
+| 多位数下标元组（`X_{1 16}`) | **不静默合并**：stash 保护后原样保留 | math zone |
+| 数学区字母拆散（`a l l o w e d`→`allowed`) | ≥5 个单字母并跑合并；2 个（`x y` 变量对）不动 | math zone |
+| ff 连字词典（`dificulty`→`difficulty` 等 22 条） | 封闭词典，全小写词边界，绝不误伤合法词形（`of` 剔除） | text zone |
 
-**B 类（语义级）只做 detect 不改**：希腊字母 `??` 占位符 → 报"疑似 OCR 字符映射错误"。
+**B 类（语义级）只做 detect 不改**：希腊字母 `??` 占位符；`X_{1 16}` 元组下标（报"space-separated numbers … review"）；3-4 字母并跑（`a b c`，报"letter-run … review"）；**U+FFFD 替换符**（`�`，报"restore from PDF"，同行一条）；**C0 控制字符**（`\x08` 等，报 `control char U+00XX`）。U+FFFD/控制字符只在 text/math 段报，code 段跳过。
 
 ### 4.5 algorithm(mineru-algorithm div 转换）
 
@@ -166,9 +181,9 @@ MinerU 把算法/伪代码（及误圈的说明段落）打进 `<div class="mine
 
 处理：
 - 拆掉 div 标签
-- **锚点行**（`Algorithm N`/`算法 N` 标题、`Input:`/`Output:`/`输入:`/`输出:`、区块内编号步骤 `^\d+\.\s`、控制关键字 `for/while/if/return/repeat/until`)→ 代码块
+- **锚点行**（`Algorithm N`/`算法 N` 标题、`Input:`/`Output:`/`输入:`/`输出:`、区块内编号步骤 `^\d+\.\s`、控制关键字 `for/foreach/while/if/elif/else/return/repeat/until/end/continue/define/synthesize/complexify/require/ensure`)→ 代码块
+- **整段判定（v2）**：一个连续锚点 run 内**任一行含 `$`** → 整个 run 转正文（公式恢复渲染，B157）；无 `$` → 照常进 ` ``` ` 围栏（Agent World 的 Algorithm 1 合成单块）
 - **其余行** → 回正文（`$...$` 恢复渲染）
-- **拿不准的行** → 回正文 + detect 报"algorithm div @行N：第 X 行难以归类"（交 Agent 核对）
 
 实证依据：algorithm div 内**无真代码**(def/class/import 零命中），只有伪代码与说明文字；真代码 MinerU 走 ` ```python ` 代码块，归 zones 保护区，不经本 fixer。
 
@@ -178,18 +193,32 @@ MinerU 偶尔把代码段降级为普通文本（缺 ``` 围栏，如 `import nu
 
 **守"不确定就上报"原则，不试图囊括所有情况：**
 
-- **高置信才包块**：连续 ≥2 个完整锚点行（行首 `import`/`from..import`/`def (`/`class `/`print(`/`return `/`#include`/`plt.`/`for .. in .. :`)，且行内无 `$`、无中文句子）→ 包成 ` ```python `（默认 python；含 `#include`/`std::` 则 cpp，不做更多语言猜测）。
+- **围栏感知（v2 P0 修复）**：`_split_fence_runs` 把文本按 ` ``` ` 围栏切成 (in_fence, run) 段——已有围栏内容 **fix/detect 全部透传/跳过**（修 v1 数据破坏 bug：往已有围栏内插围栏）；未闭合围栏其后所有行保守视为 fenced。行号按段偏移换算。
+- **高置信才包块（仅 fence 外 run）**：连续 ≥2 个完整锚点行（行首 `import`/`from..import`/`def (`/`class `/`print(`/`return `/`#include`/`plt.`/`for .. in .. :`)，且行内无 `$`、无中文句子）→ 包成 ` ```python `（默认 python；含 `#include`/`std::` 则 cpp，不做更多语言猜测）。
 - **以下任一情况只 detect 上报、不包块**：锚点行混入 `$...$`（公式与代码纠缠）；锚点行混入中文句子（可能是正文提及代码）；孤立单锚点行；语言/边界不明确。
 - 上报格式：`[code_fence] line N: suspected code block (needs agent review)` + 首行摘录，交 Agent 判断。
+- **代码结构三检测（v2，detect-only）**：①围栏开标签 ∈ `{prolog,txt,makefile,lua}` 且块内 ≥2 行命中锚点正则 → "fence labeled 'X' but content looks like python"（K3 形态）；②闭围栏后 ≤3 行（仅空行/短行间隔）又现开围栏 → "adjacent fragmented fences (possible pagination split)"；③围栏块 ≥8 行、含 `def |for |if ` 且所有行首无缩进 → "code block has no indentation (possible indent loss)"。全部带行号、只上报。
 
 ### 4.7 images(file_based=True)
 
-图片**复制**（非移动）到 `.md` 同级 `images/`，并把本地引用重写为 `images/<文件名>`。外部 URL(http/https）不动。
+图片**复制**（非移动）到 `.md` 同级目录，并把本地引用重写。外部 URL(http/https）不动。
 
-- 图源目录是参数（`organize(md_path, source_images_dir)`)，可用 `--images-dir` 指定（如 MinerU 图包位置）。
+- 图源目录是参数（`organize(md_path, source_images_dir, out_dir_name="images")`)，可用 `--images-dir` 指定（如 MinerU 图包位置）；**输出目录名**用 `--images-out-dir NAME` 指定（默认 `images`，K3 解析需要 `Image/`），引用重写同步用该名。
 - **边界**：只能修"引用路径"，不能恢复图片本体缺失。图片缺失时 verifier 报告并引导用户用能导图的转换器（如 MinerU Standard API）重转。
-- detect：报缺失图片（带行号）。
-- **图文分离 detect**：MinerU 偶尔把图片与图注错序（如首页大图被放在文档标题之前，图注却在正文）。detect 检查机械信号——图片引用出现在第一个 `#` 标题**之前**——上报 Agent（不自动挪位，正确位置需读懂论文结构）。Agent 拿到提示后按文义把图片引用移到对应图注旁。
+- detect：
+  - 报缺失图片（带行号）
+  - **图文分离 detect**：图片引用出现在第一个 `#` 标题**之前** → 上报 Agent（不自动挪位）
+  - **图-图注配对（v2，K=3）**：`_CAPTION_WINDOW=3`（覆盖空行变体、防跨图串扰，detect-only 宁紧）。①图片行 ±3 内无图注 → "image has no caption … possible orphan/misplaced figure"；②图注行 ±3 内无图 → "caption has no image … possible orphan caption"；③通过①+②配对确认的图注编号序列非单调 → "possible figure order anomaly … verify visually"（整条一次）。图注识别：英文 `Figure N:`/`Fig. N`/`Fig N`；中文 `图 N` 且行长 ≤40 且不以 `。` 结尾（排除"图 5 给出了……。"正文提及）
+  - **图包未引用图审计（v2）**：读 `<md_dir>/images/`（不存在则静默跳过），集合差 `图包文件名 - 被引用 basename`，每个未引用文件一条"unreferenced image in bundle (possible missing figure or formula fragment)"；>15 条由 `_format_issues` 自然折叠。只读不写
+  - **轴标签误标（v2）**：`^#{1,6}\s*\S{1,12}/(元|秒|米|千克|个|件|%|kg|cm|mm|m|s)$` → "possible axis label mis-tagged as heading"（B196 `## 利润值/元`）
+
+### 4.8 url_join（同行断 URL 接合）
+
+MinerU 偶发把 URL 断成"URL + 空格 + 续段"（Agent World：`arxiv.org/abs/ 2601.05808`）。
+
+- **fix（同行才接）**：`url` 段以 `/`、`.`、`-` 结尾，且紧随的 `text` 段以 ` +<tok>` 开头；`<tok>` 全为 URL 字符集（`[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]`）、含 ≥1 个 `[0-9./-]`、不含 CJK → 合并为完整 URL。其余不动。
+- **detect（跨行只报）**：URL 段后随 text 段以 `\n +<url-charset tok>` 开头 → "possible URL split across lines — review"（交 Agent 判断续段是否属于 URL）。
+- code 区内 URL 天然不受影响（code_block 是保护区）。
 
 ## 5. 缺陷画像（实证）与修复归属
 
@@ -212,15 +241,32 @@ MinerU 偶尔把代码段降级为普通文本（缺 ``` 围栏，如 `import nu
 | 三线表未被识别为表格（输出成普通文本） | ❌ 列对不齐 | Agent（用户反馈驱动；结构信息已丢，手工重建，不做 detect/fixer) |
 | 代码段降级为普通文本（缺 ``` 围栏） | ❌ 代码不渲染 | code_fence（高置信包块；模糊即上报 Agent) |
 | 图片本体缺失（MinerU 未导图） | ❌ | 引导用户重转（fixer 修不了本体） |
+| 已有围栏内被二次包块（v1 数据破坏） | ❌ 代码裂开 | code_fence（v2 围栏状态机，已有围栏零改动） |
+| 围栏误标语言（prolog/txt/makefile 装 python） | ❌ 语法高亮错 | code_fence(detect) → Agent |
+| 围栏碎片化（分页切碎） | ⚠️ | code_fence(detect) → Agent |
+| 代码块缩进丢失 | ⚠️ 语义错 | code_fence(detect) → Agent |
+| 行内公式降级为文本（`X\~B(`、`0<p<1`) | ❌ 公式不渲染 | math_delim(detect) → Agent 包 `$...$` |
+| 乱码公式内容（`= 1 = 1`） | ❌ | math_delim(detect) → Agent 对照 PDF |
+| URL 断行（`arxiv.org/abs/ 2601.05808`) | ❌ 链接断 | url_join（同行接合；跨行 detect → Agent) |
+| U+FFFD 替换符 / C0 控制字符 | ❌ 字符缺失 | ocr_cleanup(detect) → Agent 对照 PDF 恢复 |
+| ff 连字丢失（dificulty） | ❌ 拼写错 | ocr_cleanup（封闭词典自动修） |
+| 数学区字母拆散（`a l l o w e d`) | ❌ | ocr_cleanup（≥5 自动合并；3-4 detect → Agent) |
+| 多位数下标元组（`X_{1 16}`） | ⚠️ | ocr_cleanup（不合并 + detect → Agent) |
+| 图与图注分离（孤儿图/孤儿图注） | ⚠️ 图注错位 | images(detect) → Agent 按文义挪位 |
+| 图注编号乱序 | ⚠️ | images(detect) → Agent 视觉核对 |
+| 图包含未引用图（公式碎片图） | ⚠️ | images(detect) → Agent |
+| 轴标签误标为标题（`## 利润值/元`) | ⚠️ | images(detect) → Agent |
 
 ## 6. SKILL.md 设计
 
 ### 6.1 Frontmatter
 
+v2.0.0 起 description 以 tables/math/code/figures 渲染症状为主（触发面即产品面），化学式降为可选（opt-in 修复器），保持 "Use when..." 触发式写法、≤500 字符：
+
 ```yaml
 ---
 name: obsidian-md-fixer
-description: Use when a Markdown file converted from a PDF or Word document (especially by MinerU, but also pandoc/Marker/any converter) shows tables as raw HTML, chemical formulas like SiO2 unrendered, broken \( ... \) math delimiters causing ParseError, or images not displaying in Obsidian.
+description: Use when a Markdown file converted from a PDF or Word document (especially by MinerU, but also pandoc/Marker/any converter) shows tables as raw HTML, broken \( ... \) math delimiters causing ParseError, code blocks missing their ``` fences or mislabeled, images missing or misplaced with orphan/out-of-order captions, OCR artifacts like U+FFFD or split words, or unreferenced image files — in Obsidian. Chemical subscripts (SiO2) are handled by an optional fixer.
 ---
 ```
 
@@ -239,38 +285,42 @@ skill 是否被触发完全由 `description` 决定：
 3. **Quick Reference**：命令速查（见 §8)，必须 `python -m`
 4. **Workflow**:agent 实际执行的指令
    - 确认输入是 `.md`（其他格式提示先转换）
-   - 选 fixer：源为物理/数模文档时 `--skip chem_formula`（或按 detect 画像提示）
-   - 跑命令（默认 `<name>_fixed.md`，不覆盖原文件；`--in-place` 先建 `.bak`)
+   - 跑命令（默认 `<name>_fixed.md`，不覆盖原文件；`--in-place` 先建 `.bak`)；默认集即 CS/AI/数学/物理安全配置，**不再需要 --skip 魔法**
+   - 化学机会提示：若 verifier 报 chem-opportunity 且文档确为化学/材料 → `--fixers chem_formula` 重跑；顺带处理低置信 wrap 清单（对照原文还原变量名）
    - 退出码处理：0 报告产物；1 报告错误；2 报告产物并逐条列 verifier issue
    - 图片缺失：询问用户图包位置 → `--images-dir` 重跑；无图包则引导重转
-   - 语义 issue(Agent 修）:detect 标记的上下标、OCR 误判、三线表
+   - **图片审计（v2）**：按 unreferenced/pairing/order-anomaly issue 处理；可 Read 图片文件视觉核对图序
+   - 语义 issue(Agent 修）:detect 标记的上下标、OCR 误判、U+FFFD（对照 PDF 恢复）、URL 断行、行内公式降级（包 `$...$`，注意中文区间 `1\~8` 不误包）、三线表
    - 汇报产物路径，提醒在 Obsidian 打开确认；产物在 vault 外则建议移入
 5. **可选：公式语义审查**（三条硬规则：显式触发、模式级目标、只报告不改）
-6. **Common Mistakes**：直接跑 `python scripts/x.py`、覆盖原文件、手改 HTML 表格、让 chem_formula 碰数模文档、在此转换 PDF/Word
+6. **Common Mistakes**：直接跑 `python scripts/x.py`、覆盖原文件、手改 HTML 表格、**继续传 `--skip chem_formula`**（v2 默认已不含，无意义）、无视低置信 wrap 清单、在此转换 PDF/Word
 
 ## 7. README 设计
 
-- 简介段：修复已转换 Markdown;"零依赖零 token、适用任何 md、不访问网络"
+- 简介段：修复已转换 Markdown;"零依赖零 token、适用任何 md、不访问网络";**定位段常青**——默认面向 CS/AI/数学/物理论文深度优化、化学式下标为可选修复器（不提版本号，版本叙事归 Release notes）
 - 依赖：Python 3.10+;pytest 仅测试需要
 - 安装与更新：**方式一 plugin marketplace**(`/plugin marketplace add` → `/plugin install`，或 skills 管理点更新，无需 clone);**方式二手动 clone + `git pull`**
-- 使用：全部 CLI flag 示例；退出码说明
-- 修复器做了什么：四个修复器表格 + 机械 vs 语义边界
+- 使用：全部 CLI flag 示例（含 `--fixers chem_formula`、`--images-out-dir`）；退出码说明
+- 修复器做了什么：全部修复器表格（含 opt-in 标注与 detect 能力）+ 机械 vs 语义边界 + 换行符保留说明
 - 数据安全：默认不覆盖原文件、`--in-place` 先建 `.bak`、重要文档建议备份
 
 ## 8. 使用方式
 
 ```bash
-# 修复 Markdown(默认输出 <name>_fixed.md,不覆盖原文件)
+# 修复 Markdown(默认输出 <name>_fixed.md,不覆盖原文件;打印每 fixer 变更摘要)
 python -m scripts.postprocess paper.md
 
-# 只跑部分修复器(数模文档跳过化学式,避免误伤 Sv^2)
-python -m scripts.postprocess paper.md --skip chem_formula
+# 化学/材料文档:显式开启化学式下标(v2 起为 opt-in)
+python -m scripts.postprocess paper.md --fixers chem_formula
 
-# 只跑指定修复器
+# 只跑部分修复器
 python -m scripts.postprocess paper.md --fixers table,images
 
 # 图片在别处(如 MinerU 图包),指定图源目录
 python -m scripts.postprocess paper.md --images-dir "D:/mineru输出/images"
+
+# 输出目录名(如 K3 解析需要 Image/;引用重写同步)
+python -m scripts.postprocess paper.md --images-out-dir Image
 
 # 原地修复(自动创建 .bak 备份)
 python -m scripts.postprocess paper.md --in-place
@@ -352,3 +402,37 @@ python -m scripts.fixers.table paper.md
 - 批量处理整个目录（待真实需求驱动，YAGNI)
 - 自定义输出后缀（`--suffix`)
 - ocr_cleanup 白名单/模式按需扩充（严守 A 类确定性边界）
+- 无图注场景的图序错序视觉检测：机械信号不存在（无图注行可锚定），归 Agent 视觉核对——不设分类器（D5）；若未来样本证明图包内文件 mtime/页码可作锚点，再评估
+- 连字词典扩充（严格守"词形绝不合法"准入;拿不准不收）
+
+## 14. v2.0.0 转型决策记录
+
+> 本节蒸馏自 `docs/superpowers/plans/2026-07-31-v2.0.0-deep-adaptation-plan.md` §2（决策讨论的完整证据与用户拍板过程见该文）。v2.0.0 定位转变：**不再用适配化学的机制修复 CS 和数理文章，转型为对 CS/AI/数学/物理论文深度适配的修复 skill**。
+
+### D1 转型里程碑（用户拍板）
+
+发布 v2.0.0。README 定位段常青（不提版本号）——"默认面向 CS/AI/数学/物理论文，化学式下标为可选修复器"；版本变迁叙事归 Release notes；本节为 DESIGN 内的决策记录。
+
+### D2 chem_formula 退出默认集合（默认关闭，opt-in）
+
+依据：用户真实语料 = LLM/CS/数学/物理（化学论文仅最初一篇）；误伤 = 静默数据损坏，漏修 = 可见可回退，**风险不对称**。默认流水线即 CS/数理安全配置，误伤面归零，无需任何"自动跳过"魔法。化学用户凭化学机会提示（D5）显式 `--fixers chem_formula` 开启。
+
+### D3 周期表校验替代排版模式匹配
+
+开启 chem 后，token 被包下标须同时满足：①全部字母可切分为 118 元素符号（大小写敏感，贪心切分——比全回溯更保守）②至少含一个数字 ③前导字符不是连字符。**周期表是物理钉死的封闭集合，永不增长——这是唯一白名单。** 效果：GSM8K/MATH500/GPT2/MoE/LoRA/FLOPs/LLMs 全拒；`Sv2`（`v` 非元素）、`SiC`（无数字）全拒——当年 `--skip` 的两大理由从构造上消失。残余漏网只有"单元素字母+数字"形（V3/K3/C1/F2）→ 进低置信复核清单交 Agent。顺带修 v1 局限：多位数下标 `C6H12O6` → `$C_{6}H_{12}O_{6}$`。
+
+### D4 脚本管形态，Agent 管词汇（反臃肿总则）
+
+LLM/CS 新名词月月增长，任何"已知 ML 名词名单"都会臃肿且永远追不上。钉死：**脚本只认形态与封闭集合**（周期表、连字词典、URL 字符集、稳定上下文词）；开放词汇判断全部归 Agent——Agent 的模型知识天然认识新模型，它就是活的名词数据库。画像扫描全部脚本化（正则计数），零 token 消耗；Agent 只读 issue 清单与被标记行。
+
+### D5 症状驱动，不设领域分类器
+
+"深度适配"不依赖"判断这是哪类论文"：所有新检测器都是症状驱动（U+FFFD 出现才报、URL 断行才报、图包有未引用图才报），症状不存在则输出为零；全部 detect-only，无误伤风险，全量对所有文档跑。issue 清单本身就是为该文档定制的体检报告。原"画像"瘦身为一项：**化学机会检测**（正文区通过周期表校验的公式形态 token ≥3 个 → 一行折叠提示，措辞按化学上下文词有无分两档）。生物等未适配领域拿去跑构造上天然安全（BRCA1/IL6/COX2 被拒；HIF1 型漏网进复核清单），但不为其做专门适配（无样本，YAGNI）。
+
+### D6 图-图注配对检测，K=3
+
+v1.3.0 的"图在第一个标题前"检测方向正确（K3 样本实测命中）但信号偏窄。泛化：①图片 ±3 行内无图注 → orphan image；②图注 ±3 行内无图 → orphan caption；③配对确认的图注编号非单调 → possible order anomaly。K=3 依据：覆盖空行变体（图/空行/图注 = 间距 2，多空行 = 3）且防跨图串扰；detect-only 宁可偏紧。写成具名常量，后续凭样本证据再调。**不做**：自动挪位、子图自动拼接（语义，归 Agent）、无图注场景的错序检测（机械信号不存在，归 Agent 视觉；见 §13）。
+
+### D7 发布形态与工作流（用户拍板）
+
+单版本一次发布：功能分支 `feat/v2.0.0-deep-adaptation` 上按阶段分批 commit，不碰 main、不打 tag、不推送；主对话 review 通过后合并 main、plugin.json version ↔ tag ↔ GitHub Release 三者对齐。

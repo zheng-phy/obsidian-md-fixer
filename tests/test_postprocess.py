@@ -11,7 +11,7 @@ def test_fix_mode_writes_fixed_copy_and_keeps_original(tmp_path):
     fixed = tmp_path / "paper_fixed.md"
     content = fixed.read_text(encoding="utf-8")
     assert "<table>" not in content
-    assert "$SiO_2$" in content
+    assert "$" not in content  # v2 默认集不含 chem_formula,SiO2 不再自动 wrap
     assert md.read_text(encoding="utf-8").startswith("<table>")  # original untouched
 
 
@@ -23,7 +23,7 @@ def test_in_place_creates_backup(tmp_path):
 
     assert code == 0
     assert (tmp_path / "paper.md.bak").exists()
-    assert "$SiO_2$" in md.read_text(encoding="utf-8")
+    assert md.read_text(encoding="utf-8") == "SiO2"  # 默认集不动化学式
 
 
 def test_missing_input_returns_1(tmp_path):
@@ -60,7 +60,7 @@ def test_fixers_only_table(tmp_path):
     md.write_text("<table><tr><td>SiO2</td></tr></table>", encoding="utf-8")
     main([str(md), "--fixers", "table"])
     content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
-    assert "<table>" not in content and "$SiO_2$" not in content
+    assert "<table>" not in content and "$SiO_{2}$" not in content
 
 
 def test_images_dir_used(tmp_path):
@@ -68,7 +68,7 @@ def test_images_dir_used(tmp_path):
     src.mkdir()
     (src / "a.png").write_bytes(b"x")
     md = tmp_path / "p.md"
-    md.write_text("![f](images/a.png)", encoding="utf-8")
+    md.write_text("![f](images/a.png)\nFigure 1: ok\n", encoding="utf-8")
     code = main([str(md), "--images-dir", str(src)])
     assert (tmp_path / "images" / "a.png").exists()
     assert code == 0

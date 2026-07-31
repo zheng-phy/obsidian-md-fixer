@@ -22,3 +22,18 @@ def test_image_after_heading_not_flagged(tmp_path):
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     problems = detect(md)
     assert not any("before" in problem.message.lower() for problem in problems)
+
+
+def test_axis_label_mis_tagged_as_heading(tmp_path):
+    md = tmp_path / "p.md"
+    md.write_text("## 利润值/元\ntext\n", encoding="utf-8")
+    (tmp_path / "images").mkdir()
+    problems = detect(md)
+    assert any("axis label" in p.message for p in problems)
+
+
+def test_normal_heading_not_flagged_as_axis_label(tmp_path):
+    md = tmp_path / "p.md"
+    md.write_text("## 利润分析\ntext\n", encoding="utf-8")
+    (tmp_path / "images").mkdir()
+    assert not any("axis label" in p.message for p in detect(md))

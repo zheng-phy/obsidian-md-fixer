@@ -23,3 +23,59 @@ def test_issues_json_written(tmp_path):
     assert all(
         "fixer" in item and "line" in item and "message" in item for item in data
     )
+
+
+def test_default_run_excludes_chem_formula(tmp_path):
+    # v2:默认集不含 chem_formula,SiO2 保持原样
+    md = tmp_path / "p.md"
+    md.write_text("催化剂 SiO2 反应", encoding="utf-8")
+    assert main([str(md)]) == 0
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "$" not in content
+
+
+def test_explicit_chem_formula_selected(tmp_path):
+    md = tmp_path / "p.md"
+    md.write_text("催化剂 SiO2 反应", encoding="utf-8")
+    assert main([str(md), "--fixers", "chem_formula"]) == 0
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "$SiO_{2}$" in content
+
+
+def test_skip_chem_formula_is_harmless_noop(tmp_path):
+    # --skip chem_formula 不再有意义但必须不报错,结果与默认相同
+    md = tmp_path / "p.md"
+    md.write_text("催化剂 SiO2 反应", encoding="utf-8")
+    assert main([str(md), "--skip", "chem_formula"]) == 0
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "$" not in content
+
+
+def test_images_out_dir_used(tmp_path):
+    src = tmp_path / "ext"
+    src.mkdir()
+    (src / "a.png").write_bytes(b"x")
+    md = tmp_path / "p.md"
+    md.write_text("![f](old/a.png)\nFigure 1: ok\n", encoding="utf-8")
+    code = main([str(md), "--images-dir", str(src), "--images-out-dir", "Image"])
+    assert (tmp_path / "Image" / "a.png").exists()
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "![f](Image/a.png)" in content
+    assert code == 0
+
+
+def test_fix_summary_printed(tmp_path, capsys):
+    md = tmp_path / "p.md"
+    md.write_text("<table><tr><td>x</td></tr></table>\n", encoding="utf-8")
+    assert main([str(md)]) == 0
+    out = capsys.readouterr().out
+    assert "[table] applied" in out
+
+
+def test_fix_summary_no_change_printed(tmp_path, capsys):
+    # exit 0 也打印摘要,消除"零差异报成功"的误导
+    md = tmp_path / "p.md"
+    md.write_text("plain text", encoding="utf-8")
+    assert main([str(md)]) == 0
+    out = capsys.readouterr().out
+    assert "[table] no change" in out
