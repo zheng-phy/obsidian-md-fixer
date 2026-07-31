@@ -9,4 +9,4 @@ def test_chinese_and_space_path(tmp_path):
     code = main([str(md)])
     assert code == 0
     content = (d / "论文 笔记_fixed.md").read_text(encoding="utf-8")
-    assert "$SiO_2$" in content
+    assert "$SiO_{2}$" in content

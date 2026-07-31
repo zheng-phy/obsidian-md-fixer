@@ -11,7 +11,7 @@ def test_fix_mode_writes_fixed_copy_and_keeps_original(tmp_path):
     fixed = tmp_path / "paper_fixed.md"
     content = fixed.read_text(encoding="utf-8")
     assert "<table>" not in content
-    assert "$SiO_2$" in content
+    assert "$SiO_{2}$" in content
     assert md.read_text(encoding="utf-8").startswith("<table>")  # original untouched
 
 
@@ -23,7 +23,7 @@ def test_in_place_creates_backup(tmp_path):
 
     assert code == 0
     assert (tmp_path / "paper.md.bak").exists()
-    assert "$SiO_2$" in md.read_text(encoding="utf-8")
+    assert "$SiO_{2}$" in md.read_text(encoding="utf-8")
 
 
 def test_missing_input_returns_1(tmp_path):
@@ -60,7 +60,7 @@ def test_fixers_only_table(tmp_path):
     md.write_text("<table><tr><td>SiO2</td></tr></table>", encoding="utf-8")
     main([str(md), "--fixers", "table"])
     content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
-    assert "<table>" not in content and "$SiO_2$" not in content
+    assert "<table>" not in content and "$SiO_{2}$" not in content
 
 
 def test_images_dir_used(tmp_path):
