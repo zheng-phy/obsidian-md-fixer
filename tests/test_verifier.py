@@ -37,3 +37,17 @@ def test_detects_unfixed_formula(tmp_path):
     md.write_text("The support is SiO2.", encoding="utf-8")
 
     assert any("SiO2" in p for p in verify(md))
+
+
+def test_chem_opportunity_shown_on_default_set_but_not_when_chem_selected(tmp_path):
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text("催化剂 SiO2 和 Al2O3 反应,另见 TiO2 数据", encoding="utf-8")
+    # 默认集(不含 chem_formula):机会提示出现
+    default_set = ["table", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "images"]
+    default_issues = verify_issues(md, default_set)
+    assert any("formula-like" in i.message for i in default_issues)
+    # 显式选中 chem_formula:提示消失(已由 fixer 本体处理)
+    chem_issues = verify_issues(md, ["chem_formula"])
+    assert not any("formula-like" in i.message for i in chem_issues)

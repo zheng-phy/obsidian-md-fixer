@@ -3,30 +3,53 @@
 This is the interface between deterministic fixes and agent-driven semantic
 fixes: each fixer reports what remains after its mechanical pass, with line
 numbers, so the agent can repair semantics (superscripts, broken sentences).
-Also retains checks no single fixer owns (e.g. $ delimiter balance).
+Also retains checks no single fixer owns (e.g. $ delimiter balance) and the
+chem-opportunity hint (the inverse of the old doc-profile hint: since
+chem_formula is opt-in, point chemistry documents at it).
 """
 
 import re
 from pathlib import Path
 
 from scripts.fixers import all_fixers, select
+from scripts.fixers.base import Issue, split_zones
 
 _CODE_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
 _DISPLAY_MATH_MARKER_RE = re.compile(r"\$\$")
 
-_MATH_ENV_RE = re.compile(r"\$\$|\\tag\{|\\begin\{equation\}")
-_CHEM_LIKE_RE = re.compile(r"(?<![A-Za-z0-9$])(?:(?:[A-Z][a-z]?\d*){2,}|[A-Z][a-z]?\d+)(?![A-Za-z0-9])")
-_PROFILE_MATH_THRESHOLD = 10
+# Closed list of chemistry-domain context words (stable domain vocabulary,
+# allowed by the v2 constraint; everything else stays open in detect()).
+_CHEM_CONTEXT_WORDS = ("溶液", "反应", "材料", "化学", "mol", "L", "XRD", "SEM", "TEM", "chemical", "reaction")
+_CHEM_OPPORTUNITY_THRESHOLD = 3
 
 
-def doc_profile_hint(text: str) -> str | None:
-    """Suggest --skip chem_formula for math-dense docs with no chemical formulas."""
-    math_hits = len(_MATH_ENV_RE.findall(text))
-    chem_hits = len(_CHEM_LIKE_RE.findall(text))
-    if math_hits >= _PROFILE_MATH_THRESHOLD and chem_hits == 0:
-        return ("doc profile: math-dense document with no chemical formulas detected; "
-                "consider --skip chem_formula to avoid subscript misfires")
-    return None
+def _chem_opportunity(text: str) -> Issue | None:
+    """Suggest --fixers chem_formula when bare formula-like tokens cluster.
+
+    Counts DISTINCT periodic-table-valid tokens (same _is_formula_token gate
+    the fixer uses) surviving outside protected zones; >=3 distinct tokens
+    triggers the hint. Chemistry-context words upgrade the wording; without
+    them the hint stays neutral. Suppressed entirely when chem_formula is
+    selected (its own detect() then handles reporting).
+    """
+    from scripts.fixers.chem_formula import _FORMULA_RE, _is_formula_token
+
+    tokens: set = set()
+    for kind, seg in split_zones(text):
+        if kind == "text":
+            tokens.update(
+                m.group(0) for m in _FORMULA_RE.finditer(seg) if _is_formula_token(m.group(0))
+            )
+    if len(tokens) < _CHEM_OPPORTUNITY_THRESHOLD:
+        return None
+    examples = ", ".join(sorted(tokens)[:2])
+    if any(w in text for w in _CHEM_CONTEXT_WORDS):
+        msg = (f"detected {len(tokens)} formula-like tokens (e.g. {examples}) — "
+               "likely a chemistry document; re-run with `--fixers chem_formula`")
+    else:
+        msg = (f"detected {len(tokens)} formula-like tokens (e.g. {examples}) — "
+               "if this is a chemistry/materials document, re-run with `--fixers chem_formula`")
+    return Issue("verifier", 0, msg)
 
 
 def _check_dollar_balance(text: str) -> list[str]:
@@ -47,8 +70,6 @@ def _check_dollar_balance(text: str) -> list[str]:
 
 def verify_issues(md_path: Path, fixer_ids: list | None = None) -> list:
     """Aggregate selected fixers' detect() into structured Issue objects."""
-    from scripts.fixers.base import Issue
-
     md_path = Path(md_path)
     text = md_path.read_text(encoding="utf-8")
     chosen = select(fixer_ids) if fixer_ids else all_fixers()
@@ -59,9 +80,10 @@ def verify_issues(md_path: Path, fixer_ids: list | None = None) -> list:
         issues += fixer.detect(target)
     for msg in _check_dollar_balance(text):
         issues.append(Issue("verifier", 0, msg))
-    hint = doc_profile_hint(text)
-    if hint:
-        issues.insert(0, Issue("verifier", 0, hint))
+    if not any(f.id == "chem_formula" for f in chosen):
+        opportunity = _chem_opportunity(text)
+        if opportunity:
+            issues.insert(0, opportunity)
     return issues
 
 
