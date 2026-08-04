@@ -194,3 +194,59 @@ def test_ligature_not_in_math():
 def test_ligature_word_boundary_respected():
     # efecitve 的变体不在词典内;"effect" 内嵌 "eect"?无。词界保证不误伤子串
     assert fix("an effect of x") == "an effect of x"
+
+
+# --- array 列说明符豁免(MoE稀疏门控:r l r 误报/误合并)---
+
+def test_array_decl_format_string_untouched_by_fix():
+    # 5 列格式串本会被 5+ letter-run 合并成 "r l r l r" -> "rlrlr",现在豁免
+    text = "$\\begin{array}{r l r l r}$"
+    assert fix(text) == text
+
+
+def test_array_decl_no_detect_issue():
+    problems = detect("$\\begin{array}{r l r}$")
+    assert not any("letter-run" in p.message for p in problems)
+
+
+def test_array_decl_other_runs_still_handled():
+    # 豁免只覆盖格式串;公式其余部分的 letter-run 照常合并
+    assert fix("$\\begin{array}{c} a l l o w e d \\end{array}$") == "$\\begin{array}{c} allowed \\end{array}$"
+
+
+def test_array_decl_other_runs_still_detected():
+    problems = detect("$\\begin{array}{c} a b c \\end{array}$")
+    assert any("letter-run" in p.message for p in problems)
+
+
+# --- C0 控制字符自动清除(B026 U+000B 来自 \vdots 转义损坏)---
+
+def test_control_char_removed_in_text():
+    assert fix("退格\x08字符") == "退格字符"
+    assert fix("垂直制表\x0b符") == "垂直制表符"
+
+
+def test_control_char_removed_in_math():
+    assert fix("$a\x0bb$") == "$ab$"
+
+
+def test_control_char_kept_in_code_fence():
+    text = "```\na\x0bb\n```"
+    assert fix(text) == text
+
+
+def test_control_char_kept_in_inline_code():
+    text = "`a\x0bb`"
+    assert fix(text) == text
+
+
+def test_detect_still_reports_control_in_code_fence():
+    # 修不到 code 区,detect 兜底照报
+    problems = detect("```\n\x0b\n```")
+    hits = [p for p in problems if "control char" in p.message]
+    assert len(hits) == 1
+
+
+def test_detect_clean_after_fix():
+    problems = detect(fix("正文\x0b字符 $a\x08b$"))
+    assert not any("control char" in p.message for p in problems)

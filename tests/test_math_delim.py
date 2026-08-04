@@ -82,3 +82,93 @@ def test_detect_garbled_math_body():
 def test_detect_clean_math_not_reported():
     problems = detect("$x = y + 1$ 正常")
     assert not any("garbled" in p.message or "downgraded" in p.message for p in problems)
+
+
+# --- \[...\] 显示公式(本地增量入库:T1 24 处 / T2 回归 fixture)---
+
+def test_display_bracket_converted():
+    assert "$$x=1$$" in fix("\\[\nx=1\n\\]")
+
+
+def test_display_bracket_multiple_blocks():
+    out = fix("\\[\na=1\n\\]\n正文\n\\[\nb=2\n\\]")
+    assert out.count("$$") == 4 and "\\[" not in out
+
+
+def test_display_bracket_inline_converted():
+    assert "$$x=1$$" in fix("\\[x=1\\]")
+
+
+def test_display_bracket_in_code_untouched():
+    text = "```\n\\[x\\]\n```"
+    assert fix(text) == text
+
+
+def test_display_bracket_inside_math_untouched():
+    text = "$\\[x\\]$"
+    assert fix(text) == text
+
+
+def test_display_bracket_inline_math_untouched():
+    text = "正文 $x$ 与 $\\[y\\]$"
+    assert fix(text) == text
+
+
+def test_detect_residual_display_bracket():
+    problems = detect("开头 \\[\n未闭合\n")
+    hits = [p for p in problems if "\\[" in p.message]
+    assert len(hits) == 1
+
+
+def test_detect_no_residual_after_conversion():
+    problems = detect("\\[\na=1\n\\]")
+    assert not any("\\[" in p.message or "\\]" in p.message for p in problems)
+
+
+# --- garbled 误报:剔除下标/上标花括号内的 = (MoE稀疏门控 6 条误报)---
+
+def test_garbled_ignores_equals_in_subscripts():
+    # MoE稀疏门控 6 条误报:\sum_{i = 1}^{n} = x 曾数出 4 个 "="
+    problems = detect("$\\sum_{i = 1}^{n} = x$ 正常")
+    assert not any("garbled" in p.message for p in problems)
+
+
+def test_garbled_ignores_equals_in_superscripts():
+    problems = detect("$x^{a = b} + y = z$ 正常")
+    assert not any("garbled" in p.message for p in problems)
+
+
+def test_garbled_still_reported_for_true_garbled():
+    # K3 真乱码 = 1 = 1 1 仍报
+    problems = detect("$= 1 = 1 1$ 异常")
+    hits = [p for p in problems if "garbled" in p.message]
+    assert len(hits) == 1
+
+
+# --- 数字区间 \~ -> ~(2021B:36%\~41% 实样)---
+
+def test_tilde_number_range_percent_fixed():
+    assert fix("选择性在 36%\\~41% 之间") == "选择性在 36%~41% 之间"
+
+
+def test_tilde_between_digits_fixed():
+    assert fix("零件1\\~8 规格") == "零件1~8 规格"
+
+
+def test_tilde_letter_context_untouched():
+    # 字母语境 X\~B(n,p) 是降级数学,不动,detect 照报
+    text = "模型 X\\~B(n,p) 分布"
+    assert fix(text) == text
+    problems = detect(text)
+    assert any("downgraded" in p.message for p in problems)
+
+
+def test_tilde_fixed_range_not_reported():
+    assert not any("downgraded" in p.message for p in detect("选择性在 36%~41% 之间"))
+
+
+def test_tilde_inside_lparen_math_untouched():
+    # \(...\) 转成 $...$ 后,数字区间 \~ 已先转成 ~(MathJax 中 \~ 非法,~ 为间隔)
+    assert fix("\\(1\\~8\\)") == "$1~8$"
+    # 字母语境不受影响
+    assert fix("\\(X\\~B(n,p)\\)") == "$X\\~B(n,p)$"

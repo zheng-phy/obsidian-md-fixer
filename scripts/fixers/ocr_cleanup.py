@@ -67,6 +67,11 @@ _LETTER_RUN5_RE = re.compile(r"\b[A-Za-z](?:\s+[A-Za-z]){4,}\b")
 # Full maximal run (greedy, non-overlapping finditer makes this the whole
 # run); the 3-4 letter case is decided by counting the spaces afterwards.
 _LETTER_RUN_DETECT_RE = re.compile(r"\b[A-Za-z](?:\s+[A-Za-z])+\b")
+# \begin{array}{r l r}: the column-format string is NOT a split word (MoE稀疏
+# 门控 误报/误合并). Stash it (or blank it in detect) before letter-run work.
+_ARRAY_DECL_RE = re.compile(
+    r"\\begin\{(?:array|tabular|matrix|pmatrix|bmatrix|cases)\}\s*\{[^{}]*\}"
+)
 
 
 def _fix_math(seg: str) -> str:
@@ -76,6 +81,8 @@ def _fix_math(seg: str) -> str:
         saved.append(m.group(0))
         return f"\x01T{len(saved) - 1}\x01"
 
+    seg = _CONTROL_RE.sub("", seg)  # C0 chars first, before stashing markers
+    seg = _ARRAY_DECL_RE.sub(stash, seg)
     seg = _TUPLE_SUBSCRIPT_STASH_RE.sub(stash, seg)
     seg = _FSTAR_RE.sub("f^{*}", seg)
     seg = _fix_braces(seg)
@@ -91,6 +98,7 @@ def _fix_math(seg: str) -> str:
 
 
 def _fix_text_zone(seg: str) -> str:
+    seg = _CONTROL_RE.sub("", seg)  # C0 control chars are never legal in md (B026)
     for ent, ch in _HTML_ENTITIES.items():
         seg = seg.replace(ent, ch)
     seg = _fix_braces(seg)  # whitelisted letter-spaces can appear inline
@@ -165,7 +173,9 @@ def detect(text: str) -> list:
                     "space-separated numbers in sub/superscript "
                     "(possible tuple, e.g. X_{1,16}) — review",
                 ))
-            for m in _LETTER_RUN_DETECT_RE.finditer(seg):
+            # array 格式串逐字符 blank 掉(位置对齐),r l r 不参与 letter-run 判定
+            no_array = _ARRAY_DECL_RE.sub(lambda m: " " * len(m.group(0)), seg)
+            for m in _LETTER_RUN_DETECT_RE.finditer(no_array):
                 if 2 <= m.group(0).count(" ") <= 3:  # exactly 3-4 letters
                     problems.append(Issue(
                         "ocr_cleanup",
@@ -176,6 +186,9 @@ def detect(text: str) -> list:
             fffd_lines.update(
                 base_line + seg[: m.start()].count("\n") for m in _FFFD_RE.finditer(seg)
             )
+        # C0 chars are auto-removed from text/math; code zones are untouched,
+        # so detect still reports them there (fixer cannot reach into fences).
+        if kind in ("text", "math", "code_block", "inline_code"):
             ctl = _CONTROL_RE.search(seg)
             if ctl:
                 problems.append(Issue(

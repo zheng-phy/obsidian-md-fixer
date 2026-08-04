@@ -10,7 +10,9 @@ from pathlib import Path, PurePosixPath
 
 from scripts.textio import read_text_preserve, write_text_preserve
 
-_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+# Path may contain one level of nested parens (谷歌MoE 目录 "(flash实测)");
+# without it the reference would truncate at the first ')'.
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))+)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s")
 # Caption window: ±3 lines covers blank-line variants while keeping figures
 # from cross-talking; detect-only, so err tight.
@@ -26,27 +28,40 @@ def organize(md_path: Path, source_images_dir: Path, out_dir_name: str = "images
     """Copy images from source dir into <md_dir>/<out_dir_name>/ and fix paths.
 
     out_dir_name is relative to the md (default "images"; K3 parses need
-    "Image/"), and the reference rewrite uses the same name.
+    "Image/"), and the reference rewrite uses the same name. References are
+    rewritten to relative POSIX paths and only for files actually copied.
     """
+    import os
+
     md_path = Path(md_path)
     source_images_dir = Path(source_images_dir)
     target_dir = md_path.parent / out_dir_name
 
+    copied: set = set()
     if source_images_dir.is_dir() and source_images_dir.resolve() != target_dir.resolve():
-        target_dir.mkdir(exist_ok=True)
+        target_dir.mkdir(parents=True, exist_ok=True)
         for img in source_images_dir.iterdir():
             if img.is_file():
                 shutil.copy2(img, target_dir / img.name)
+                copied.add(img.name)
 
     text, newline = read_text_preserve(md_path)
 
-    def _rewrite(match: re.Match) -> str:
-        alt, path = match.group(1), match.group(2)
-        if path.startswith(("http://", "https://")):
-            return match.group(0)
-        return f"![{alt}]({out_dir_name}/{Path(path).name})"
+    if copied:
+        rel_prefix = Path(os.path.relpath(target_dir, md_path.parent)).as_posix()
 
-    write_text_preserve(md_path, _MD_IMAGE_RE.sub(_rewrite, text), newline)
+        def _rewrite(match: re.Match) -> str:
+            alt, path = match.group(1), match.group(2)
+            if path.startswith(("http://", "https://")):
+                return match.group(0)
+            name = Path(path).name
+            if name not in copied:
+                return match.group(0)  # not copied: leave verbatim (detect still nets it)
+            return f"![{alt}]({rel_prefix}/{name})"
+
+        text = _MD_IMAGE_RE.sub(_rewrite, text)
+
+    write_text_preserve(md_path, text, newline)
 
 
 def detect(md_path: Path) -> list:

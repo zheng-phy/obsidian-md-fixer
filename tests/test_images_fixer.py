@@ -19,6 +19,16 @@ def test_detect_missing_image_with_line(tmp_path):
     assert any(p.fixer == "images" and p.line == 2 and "gone.png" in p.message for p in problems)
 
 
+def test_missing_image_not_falsely_reported_for_paren_path(tmp_path):
+    img_dir = tmp_path / "子目录(实测)"
+    img_dir.mkdir()
+    (img_dir / "fig1.jpg").write_bytes(b"x")
+    md = tmp_path / "p.md"
+    md.write_text("![](子目录(实测)/fig1.jpg)", encoding="utf-8")
+    # 括号目录路径必须整体解析,不得在 ) 处截断后误报 missing image
+    assert not any("missing image" in p.message for p in detect(md))
+
+
 def test_detect_external_url_ok(tmp_path):
     md = tmp_path / "m.md"
     md.write_text("![f](https://x.com/a.png)\nFigure 1: 外部图\n", encoding="utf-8")
