@@ -54,7 +54,6 @@ obsidian-md-fixer/
 │   └── fixers/
 │       ├── __init__.py      # 注册表:register / all_fixers / select / default_order
 │       ├── base.py          # Issue / Fixer 协议 + split_zones 共享保护区
-│       ├── fffd_restore.py  # U+FFFD 从 MinerU content_list JSON 骨架唯一还原(file_based)
 │       ├── table.py         # HTML 表格 → Markdown 表格
 │       ├── table_flatten.py # 合并单元格表展平(opt-in 草稿 + 标记)
 │       ├── chem_formula.py  # 化学式下标(opt-in,周期表校验)
@@ -242,15 +241,6 @@ MinerU 偶发把 URL 断成"URL + 空格 + 续段"（Agent World：`arxiv.org/ab
 - **detect（跨行只报）**：URL 段后随 text 段以 `\n +<url-charset tok>` 开头 → "possible URL split across lines — review"（交 Agent 判断续段是否属于 URL）。
 - code 区内 URL 天然不受影响（code_block 是保护区）。
 
-### 4.9 fffd_restore（U+FFFD 从 content_list JSON 恢复，v2.1.0）
-
-MinerU 输出目录带 `content_list_v2.json`（md 的文本源头）；md 里的 `�`（U+FFFD）有时能在 JSON 片段里找回原字符。本 fixer **file_based**、`default_on=True` 但无 `--content-list` 时 no-op（默认流水线零影响）；执行序在**最前**（§2.4：ocr_cleanup 合并空格后会破坏对齐，必须在任何文本修复器之前跑，postprocess 开头特殊处理：先重写文件再读文本继续）。
-
-- **片段提取**：兼容平铺 list（B007）与分页 list[list]（ZEDA）两种结构；遍历各 item 的 `content.paragraph_content`/`title_content`，text 与 equation_inline 的 `content` 字段**按段落拼接**为一条片段。
-- **骨架唯一对齐（绝不臆造）**：对每行含 `�` 的 md 行，生成骨架（去掉 `�`、规范化空白）；在 JSON 片段中找骨架**唯一**匹配——片段去空白后与骨架一致（整条片段必须被行耗尽），且每个 `�` 对应片段中一段**唯一**的连续非 `�` 字符（gap，≤12 字符）可回填。同一片段内多种 gap 切分或 ≥2 个片段候选 → 保留 `�`。对齐用带 memo 的 DP 计数（cap=2 提前退出；递归深度有界 = 行长度）。
-- **detect**：无 `--content-list` 且 md 含 `�` → 一条提示 "N line(s) contain U+FFFD … pass --content-list PATH"；有 JSON 时由 postprocess 报残留未对齐行（"X U+FFFD line(s) could not be aligned … restore manually"）。
-- **实测边界**（ZEDA，flash 实测）：md 与 JSON 的 `�` 同位丢失（JSON 是 md 源头），唯一对齐全部 no-op，机械还原率 **0/85**——反馈声称"85 处全可还原"不实（人工修复版靠 PDF 语义知识补 `$N$`/`$h$` 等）。还原率以实测为准写入回归报告；算法对"JSON 完好、md 后损"的文档仍有效（合成 fixture 全过）。
-
 ## 5. 缺陷画像（实证）与修复归属
 
 综合多份真实产物（材料类 pdf、数模 docx、AI/ML pdf、物理论文）:
@@ -291,7 +281,6 @@ MinerU 输出目录带 `content_list_v2.json`（md 的文本源头）；md 里�
 | 跨行 `0<\theta … r>0` 被拼成 html zone 吞公式 | ❌ 公式消失 | base（html zone 须字母/`!` 开头且单行） |
 | `\[...\]` 显示公式（Obsidian 剥反斜杠） | ❌ 公式不渲染 | math_delim → `$$...$$` |
 | `36%\~41%` 数字区间 | ❌ `\~` 异常 | math_delim（text 段数字/百分号语境 → `~`） |
-| U+FFFD 且同目录有 content_list_v2.json | ❌ 字符缺失 | fffd_restore（骨架唯一对齐；无 JSON 时 detect 提示） |
 | 合并单元格表（rowspan/colspan） | ❌ HTML 不渲染（表内 `$...$` 更看不到） | table(detect) → Agent 三档；或 `--flatten-merged-tables` 草稿展平 |
 | `<!-- image -->` 占位符 | ❌ 无图 | images(detect) → 引导重转 |
 | 正文错形（`wtih`/`drouput`/`trillionparameter`） | ⚠️ 拼写错 | ocr_cleanup(detect，错形小词典) → Agent |
@@ -496,9 +485,11 @@ v1.3.0 的"图在第一个标题前"检测方向正确（K3 样本实测命中�
 
 合并单元格表（rowspan/colspan）是 Markdown 结构外的事。MoE稀疏门控 实测警告 MinerU 的 rowspan 数据本身可能错位；2021B 的三线表又多到 Agent 手修不可持续。交点：`table_flatten` **opt-in**（`--flatten-merged-tables`）+ 每个展平表上方标记行 + detect 逐表"verify against PDF"——草稿可用，绝不冒充成品。fixture 用 B007 表8 / B026 表11 真实结构，期望输出人工核对后写死入库。
 
-### D11 U+FFFD JSON 恢复的设计边界（唯一对齐，绝不臆造）
+### D11 U+FFFD 恢复：机械还原不可行，砍掉 fffd_restore（v2.1.0 review 决策）
 
-反馈声称"ZEDA 85 处 U+FFFD 全可还原"——实测不实：md 与 content_list_v2.json 的 `�` 同位丢失（JSON 是 md 的源头），骨架唯一对齐全部 no-op，机械还原率 0/85；人工修复版靠 PDF 语义知识补 `$N$`/`$h$` 等。设计边界钉死：**只有唯一对齐才回填**（片段整体耗尽 + 每个 `�` 唯一 gap），零匹配或 ≥2 候选一律保留 `�` 并报残留。算法对"JSON 完好、md 后损"的文档（合成 fixture）有效，实测率以回归报告为准——不与反馈数字对齐，只与数据对齐。
+v2.1.0 曾实现 `fffd_restore`（从 MinerU `content_list_v2.json` 骨架唯一对齐回填 `�`），但 review 阶段独立核实：**全部真实样本里 JSON 与 md 的 `�` 同位丢失**（ZEDA md 85/json 85、Agent World 70/70——JSON 是 md 的源头，OCR 层丢的符号两边都没有），机械还原命中 **0/85、0/70**。反馈所称"可从 content_list 恢复"实为 **Agent 借 JSON 结构做上下文推断**（语义），或**对照 PDF 文本层**（PyMuPDF)——都不是脚本能机械做的事。
+
+**决策：砍掉 fffd_restore**（fixer + `--content-list` flag + 默认 detect 提示）。理由：①解决的问题在语料中不存在（0% 命中）;②默认弹出的 "pass --content-list PATH" 提示经实测是误导性建议；③真实反馈驱动 + 反臃肿（YAGNI)。U+FFFD 的有效恢复路径留给 Agent 工作流（见 §6.3 Workflow)：对照 PDF 文本层，或借 content_list 的 equation_inline 结构做上下文推断；skill 的 ocr_cleanup detect 负责逐行标记位置。此调查结论（0% 命中）留档防止未来重做。
 
 ### D12 词典扩编与豁免（连字词典大写变体）
 

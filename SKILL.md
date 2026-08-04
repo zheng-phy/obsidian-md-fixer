@@ -41,13 +41,12 @@ Run from the skill's root directory. Always `python -m`, never `python scripts/x
 | Fix a Markdown file (default CS/AI/math/physics-safe) | `python -m scripts.postprocess <file.md>` |
 | Run only some fixers | `python -m scripts.postprocess <file.md> --fixers table,images` |
 | Enable chemical subscripts (chemistry/materials only) | `python -m scripts.postprocess <file.md> --fixers chem_formula` |
-| Restore U+FFFD from the MinerU content list | `python -m scripts.postprocess <file.md> --content-list <mineru>/content_list_v2.json` |
 | Flatten merged-cell HTML tables (draft — verify!) | `python -m scripts.postprocess <file.md> --flatten-merged-tables` |
 | Supply an image bundle | `python -m scripts.postprocess <file.md> --images-dir <dir>` |
 | Name the image output dir | `python -m scripts.postprocess <file.md> --images-out-dir Image` |
 | Run one fixer alone | `python -m scripts.fixers.<name> <file.md>` |
 
-Fixers (in pipeline order): `fffd_restore` → `table` → `table_flatten` (opt-in) → `chem_formula` (opt-in) → `math_delim` → `ocr_cleanup` → `algorithm` → `code_fence` → `url_join` → `images`.
+Fixers (in pipeline order): `table` → `table_flatten` (opt-in) → `chem_formula` (opt-in) → `math_delim` → `ocr_cleanup` → `algorithm` → `code_fence` → `url_join` → `images`.
 Exit codes: 0 = success, 1 = failure (no output), 2 = output produced with verification warnings.
 
 ## Workflow
@@ -60,10 +59,13 @@ Exit codes: 0 = success, 1 = failure (no output), 2 = output produced with verif
    - 1 → report the error message verbatim; do not retry blindly.
    - 2 → report the output path AND list every verifier issue (each is `[fixer] line N: message`).
 5. **Missing images.** If the verifier reports `missing image`, the fixer only rewrites paths — it cannot restore image files. Ask the user where the converter's image bundle is, then re-run with `--images-dir <dir>` (use `--images-out-dir <name>` if the vault needs a different folder name). If there is no bundle, tell the user to re-convert with an image-producing tool (e.g. MinerU Standard API).
-6. **U+FFFD restore.** If the verifier reports `U+FFFD replacement char … pass --content-list PATH`, ask the user for the MinerU output directory (where `content_list_v2.json` lives) and re-run with `--content-list <dir>/content_list_v2.json`. The fixer restores only unique skeleton alignments; lines it cannot align are reported as `could not be aligned … restore manually` — restore those from the PDF yourself. (In practice the JSON often lost the same glyphs as the md — then the restore is a no-op and manual PDF restoration is the only path.)
+6. **U+FFFD (lost glyph) — restore it yourself, no auto-fix.** The verifier reports each `�` line. On real MinerU output the `content_list_v2.json` loses the same glyphs as the md (verified 0% mechanical restore), so there is no script shortcut. Two recovery paths, in order of reliability:
+   - **Cross-check the PDF text layer** (e.g. `pdftotext` / PyMuPDF extract, then read the symbol at the matching position) — this is what actually recovered Agent World's 70 chars.
+   - **Infer from context** — the content_list's `equation_inline` structure shows where math symbols belong (e.g. "contains �=128" + the formula `$N$` nearby → the glyph is `N`). Confirm against the PDF before editing.
+   Never guess a glyph you cannot confirm.
 7. **Image audit.** For `unreferenced image in bundle` and figure-caption pairing/order issues: the verifier can only flag mechanical signals. Read the actual image files to verify figure order visually, then move image references next to their captions / delete or re-integrate unreferenced files — as the document demands. If the MinerU output has a `layout.json`, cross-check the image order against it (B026 实证: page layout order can differ from the md insertion order).
 8. **Semantic issues stay for you.** Issues the fixers cannot resolve are yours to repair by reading the flagged lines — not by editing the scripts:
-   - `U+FFFD` (lost glyph) → restore the character from the PDF (see step 6 for the automatic attempt first); `control char U+00XX` → delete the stray control byte.
+   - `U+FFFD` (lost glyph) → restore the character from the PDF (see step 6); `control char U+00XX` → delete the stray control byte.
    - `URL split across lines` → join the continuation into the URL if the token is clearly its tail; leave prose that merely starts with a number.
    - `inline math downgraded to text` (`X\~B(`, `0<p<1`) → wrap in `$...$`; do NOT wrap digit ranges like `1\~8` (Chinese ranges are prose).
    - `garbled math body` / `space-separated numbers` (`X_{1 16}`) → compare with the PDF and repair the formula body.

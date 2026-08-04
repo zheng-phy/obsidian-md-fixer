@@ -84,9 +84,6 @@ python -m scripts.postprocess paper.md --images-dir "D:/mineru输出/images"
 # 输出目录名(默认 images;如需要 Image/ 时用)
 python -m scripts.postprocess paper.md --images-out-dir Image
 
-# 从 MinerU content_list_v2.json 恢复 U+FFFD(骨架唯一对齐,对齐不了的报残留)
-python -m scripts.postprocess paper.md --content-list "D:/mineru输出/content_list_v2.json"
-
 # 合并单元格表(HTML)展平为 Markdown 草稿(opt-in;每个表带 verify against PDF 标记)
 python -m scripts.postprocess paper.md --flatten-merged-tables
 
@@ -106,7 +103,6 @@ python -m scripts.fixers.table paper.md
 
 | 修复器 | 说明 |
 |------|------|
-| `fffd_restore` | 从 MinerU `content_list_v2.json` 恢复 `�`（U+FFFD）：骨架**唯一**对齐才回填，绝不臆造；无 `--content-list` 时自动跳过，对齐不了的行报残留 |
 | `table` | HTML `<table>` → Markdown 表格，单元格内 LaTeX 公式保留；合并单元格表保留 HTML 并报 detect（表内 `$...$` 在 Obsidian 不渲染） |
 | `table_flatten`（可选，opt-in） | 合并单元格表（rowspan/colspan）展平为 Markdown 草稿（复合列名、span 填充）；每个表带 `verify against PDF` 标记，`--flatten-merged-tables` 启用 |
 | `chem_formula`（可选，opt-in） | `SiO2` → `$SiO_{2}$`、`C6H12O6` → `$C_{6}H_{12}O_{6}$`；118 元素周期表校验 + 数字必需，`GPT2`/`MoE`/`LoRA`/`Sv2` 等绝不误伤；仅化学/材料文档显式开启 |
