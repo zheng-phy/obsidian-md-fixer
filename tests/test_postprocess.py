@@ -101,3 +101,53 @@ def test_rerun_hint_printed(tmp_path, capsys):
     main([str(md), "--skip", "chem_formula"])
     out = capsys.readouterr().out
     assert "--skip chem_formula" in out
+
+
+def test_content_list_restores_before_text_fixers(tmp_path):
+    # fffd_restore 必须先于文本修复器(ocr_cleanup 合并空格会破坏对齐)
+    import json
+
+    md = tmp_path / "p.md"
+    md.write_text("contains \ufffd=128 tokens", encoding="utf-8")
+    cl = tmp_path / "cl.json"
+    cl.write_text(
+        json.dumps([{"type": "paragraph", "content": {"paragraph_content": [
+            {"type": "text", "content": "contains "},
+            {"type": "equation_inline", "content": "$N$"},
+            {"type": "text", "content": "=128 tokens"},
+        ]}}]),
+        encoding="utf-8",
+    )
+    code = main([str(md), "--content-list", str(cl)])
+    assert code == 0
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "\ufffd" not in content
+    assert "contains $N$=128 tokens" in content
+
+
+def test_content_list_unresolvable_reported_as_residual(tmp_path):
+    import json
+
+    md = tmp_path / "p.md"
+    md.write_text("不可还原的 \ufffd 内容", encoding="utf-8")
+    cl = tmp_path / "cl.json"
+    cl.write_text(
+        json.dumps([{"type": "paragraph", "content": {"paragraph_content": [
+            {"type": "text", "content": "无关内容"}]}}]),
+        encoding="utf-8",
+    )
+    code = main([str(md), "--content-list", str(cl)])
+    assert code == 2  # 有残留 → 警告
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "\ufffd" in content  # 绝不臆造:保留
+    problems = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "\ufffd" in problems
+
+
+def test_default_run_no_content_list_is_noop_for_fffd(tmp_path):
+    md = tmp_path / "p.md"
+    md.write_text("有 \ufffd 但没给 JSON", encoding="utf-8")
+    code = main([str(md)])
+    assert code == 2  # detect 提示需要 --content-list
+    content = (tmp_path / "p_fixed.md").read_text(encoding="utf-8")
+    assert "\ufffd" in content  # 文件本身未被改写

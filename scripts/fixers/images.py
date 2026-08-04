@@ -22,6 +22,8 @@ _CAPTION_CN_RE = re.compile(r"^\s*图\s*\d+")
 _CAPTION_CN_MAX_LEN = 40  # longer lines are prose mentions, not captions
 # B196 "## 利润值/元": axis label mis-tagged as a heading.
 _AXIS_HEADING_RE = re.compile(r"^#{1,6}\s*\S{1,12}/(元|秒|米|千克|个|件|%|kg|cm|mm|m|s)$")
+# MoE稀疏门控: converter emits <!-- image --> where it did not extract images.
+_IMAGE_PLACEHOLDER_RE = re.compile(r"<!--\s*image\s*-->", re.IGNORECASE)
 
 
 def organize(md_path: Path, source_images_dir: Path, out_dir_name: str = "images") -> None:
@@ -97,9 +99,20 @@ def detect(md_path: Path) -> list:
             problems.append(
                 Issue("images", i, "possible axis label mis-tagged as heading")
             )
+        if _IMAGE_PLACEHOLDER_RE.search(line):
+            problems.append(
+                Issue(
+                    "images",
+                    i,
+                    "image placeholder (converter did not extract images) — "
+                    "extract from PDF or re-convert with an image-producing API",
+                )
+            )
 
-    # Figure-caption pairing within ±3 lines (detect-only).
-    image_lines = {i for i, line in enumerate(lines, 1) if _MD_IMAGE_RE.search(line)}
+    # Figure-caption pairing within ±3 lines (detect-only). Adjacent image
+    # lines (gap <= 2) form a cluster; one caption near ANY member pairs the
+    # whole cluster (ZEDA: 图→图→caption 共享 / 图→标签行→caption).
+    image_lines = sorted({i for i, line in enumerate(lines, 1) if _MD_IMAGE_RE.search(line)})
     caption_lines: dict = {}
     for i, line in enumerate(lines, 1):
         is_en = bool(_CAPTION_EN_RE.match(line))
@@ -113,16 +126,28 @@ def detect(md_path: Path) -> list:
             if num:
                 caption_lines[i] = int(num.group(0))
 
-    for img in sorted(image_lines):
-        if not any(abs(img - c) <= _CAPTION_WINDOW for c in caption_lines):
-            problems.append(
-                Issue(
-                    "images",
-                    img,
-                    "image has no caption within ±3 lines "
-                    "(possible orphan/misplaced figure)",
-                )
-            )
+    clusters: list = []
+    for img in image_lines:
+        if clusters and img - clusters[-1][-1] <= 2:
+            clusters[-1].append(img)
+        else:
+            clusters.append([img])
+
+    for cluster in clusters:
+        paired = any(
+            abs(img - c) <= _CAPTION_WINDOW
+            for img in cluster
+            for c in caption_lines
+        )
+        if paired:
+            continue
+        for img in cluster:
+            nearest = min((abs(img - c) for c in caption_lines), default=None)
+            message = "image has no caption within ±3 lines " \
+                      "(possible orphan/misplaced figure)"
+            if nearest is not None:
+                message += f" — nearest caption is {nearest} lines away"
+            problems.append(Issue("images", img, message))
     paired_nums: list = []
     for c, num in sorted(caption_lines.items()):
         if any(abs(c - im) <= _CAPTION_WINDOW for im in image_lines):

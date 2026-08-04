@@ -14,19 +14,23 @@ from pathlib import Path
 
 from scripts import verifier
 from scripts.fixers import all_fixers, default_order, select
+from scripts.fixers.base import Issue
 from scripts.textio import read_text_preserve, write_text_preserve
 
 
-def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None) -> list:
+def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None, flatten_tables: bool = False) -> list:
     """Compute the ordered fixer id list from --fixers / --skip.
 
     No --fixers: the default set is only default_on fixers (chem_formula is
     opt-in since v2). Explicit --fixers selects exactly what it names.
+    --flatten-merged-tables appends table_flatten (opt-in draft output).
     """
     if fixers_arg:
         ids = [s.strip() for s in fixers_arg.split(",") if s.strip()]
     else:
         ids = [f.id for f in all_fixers() if f.default_on]
+    if flatten_tables and "table_flatten" not in ids:
+        ids.append("table_flatten")
     if skip_arg:
         skip = {s.strip() for s in skip_arg.split(",") if s.strip()}
         ids = [i for i in ids if i not in skip]
@@ -78,17 +82,33 @@ def process_markdown(
     images_source_dir: Path | None,
     fixer_ids: list,
     images_out_dir: str = "images",
+    content_list_path: Path | None = None,
 ) -> tuple:
     """Run selected fixers in default order, then aggregate detect().
 
-    Returns (problems, per-fixer change summary lines).
+    fffd_restore (when selected AND given a content-list JSON) runs FIRST —
+    before any text fixer — because ocr_cleanup merges split spaces and would
+    destroy the alignment. Returns (problems, per-fixer change summary lines).
     """
     md_path = Path(md_path)
     chosen = select(fixer_ids)
 
     text, newline = read_text_preserve(md_path)
     changes: list = []
+    residual_lines: list = []
+    fffd = next((f for f in chosen if f.id == "fffd_restore"), None)
+    if fffd is not None and content_list_path is not None:
+        before_fffd = text.count("\ufffd")
+        residual_lines = fffd.run(md_path, content_list_path)
+        text, newline = read_text_preserve(md_path)
+        after_fffd = text.count("\ufffd")
+        changes.append(
+            f"[fffd_restore] restored {before_fffd - after_fffd} of "
+            f"{before_fffd} U+FFFD chars (unaligned: {len(residual_lines)} line(s))"
+        )
     for fixer in chosen:
+        if fixer.id == "fffd_restore":
+            continue  # handled above (or no-op without --content-list)
         if not fixer.file_based:
             before = text
             text = fixer.run(text)
@@ -96,6 +116,8 @@ def process_markdown(
     write_text_preserve(md_path, text, newline)
 
     for fixer in chosen:
+        if fixer.id == "fffd_restore":
+            continue  # handled above (or no-op without --content-list)
         if fixer.file_based:
             before, _ = read_text_preserve(md_path)
             src = images_source_dir if images_source_dir is not None else md_path.parent / "images"
@@ -103,7 +125,19 @@ def process_markdown(
             after, _ = read_text_preserve(md_path)
             changes.append(f"[{fixer.id}] {'applied' if after != before else 'no change'}")
 
-    return verifier.verify_issues(md_path, fixer_ids), changes
+    problems = verifier.verify_issues(md_path, fixer_ids)
+    if content_list_path is not None:
+        # with a content-list the fixer's own detect hint is replaced by the
+        # concrete unaligned-line report from run()
+        problems = [p for p in problems if p.fixer != "fffd_restore"]
+        if residual_lines:
+            problems.append(Issue(
+                "fffd_restore",
+                residual_lines[0],
+                f"{len(residual_lines)} U+FFFD line(s) could not be aligned "
+                "with content_list JSON — restore manually",
+            ))
+    return problems, changes
 
 
 def _run_fix_mode(
@@ -112,6 +146,7 @@ def _run_fix_mode(
     fixer_ids: list,
     images_dir: Path | None,
     images_out_dir: str = "images",
+    content_list_path: Path | None = None,
 ) -> tuple:
     """Fix an existing .md. Default writes <stem>_fixed.md; --in-place overwrites with .bak backup."""
     if in_place:
@@ -121,7 +156,7 @@ def _run_fix_mode(
         target = input_path.with_name(input_path.stem + "_fixed.md")
         shutil.copy2(input_path, target)
     src = images_dir if images_dir is not None else input_path.parent / "images"
-    problems, changes = process_markdown(target, src, fixer_ids, images_out_dir)
+    problems, changes = process_markdown(target, src, fixer_ids, images_out_dir, content_list_path)
     print("Fix summary:")
     for line in changes:
         print(f"  {line}")
@@ -142,6 +177,10 @@ def main(argv=None) -> int:
                         help="target directory name for copied images, relative to the md (default: images)")
     parser.add_argument("--in-place", action="store_true",
                         help="overwrite the input file (a .bak backup is created)")
+    parser.add_argument("--content-list", type=Path, default=None,
+                        help="MinerU content_list_v2.json for U+FFFD restore (fffd_restore)")
+    parser.add_argument("--flatten-merged-tables", action="store_true",
+                        help="flatten HTML tables with merged cells into Markdown (draft, verify against PDF)")
     parser.add_argument("--verify", action="store_true",
                         help="verify only: report issues, write nothing (exit 0=clean, 2=issues)")
     parser.add_argument("--dry-run", action="store_true",
@@ -158,7 +197,7 @@ def main(argv=None) -> int:
         print(f"Error: unsupported input type '{args.input.suffix}', expected .md", file=sys.stderr)
         return 1
 
-    fixer_ids = _resolve_fixer_ids(args.fixers, args.skip)
+    fixer_ids = _resolve_fixer_ids(args.fixers, args.skip, args.flatten_merged_tables)
 
     if args.verify:
         problems = verifier.verify_issues(args.input, fixer_ids)
@@ -187,7 +226,10 @@ def main(argv=None) -> int:
             )
         return 0
 
-    target, problems = _run_fix_mode(args.input, args.in_place, fixer_ids, args.images_dir, args.images_out_dir)
+    target, problems = _run_fix_mode(
+        args.input, args.in_place, fixer_ids, args.images_dir,
+        args.images_out_dir, args.content_list,
+    )
     if args.issues_json:
         _write_issues_json(args.issues_json, problems)
     print(f"Re-run: python -m scripts.postprocess {_rerun_args(args)}")
@@ -216,6 +258,10 @@ def _rerun_args(args) -> str:
         parts += ["--images-out-dir", f'"{args.images_out_dir}"']
     if args.in_place:
         parts.append("--in-place")
+    if args.content_list:
+        parts += ["--content-list", f'"{args.content_list}"']
+    if args.flatten_merged_tables:
+        parts.append("--flatten-merged-tables")
     if args.issues_json:
         parts += ["--issues-json", f'"{args.issues_json}"']
     return " ".join(parts)

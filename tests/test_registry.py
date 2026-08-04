@@ -3,12 +3,14 @@ from scripts.fixers.base import Issue, Fixer
 
 
 def test_default_order():
-    assert default_order() == ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]
+    # fffd_restore 必须最先运行(ocr_cleanup 合并空格会破坏 U+FFFD 对齐);
+    # table_flatten 紧随 table(只有 span 表会被保留为 HTML)
+    assert default_order() == ["fffd_restore", "table", "table_flatten", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]
 
 
 def test_all_fixers_registered():
     ids = {f.id for f in all_fixers()}
-    assert {"table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"} <= ids
+    assert {"fffd_restore", "table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"} <= ids
 
 
 def test_select_subset():

@@ -118,3 +118,66 @@ def test_unreferenced_audit_follows_reference_dir(tmp_path):
     (bundle / "extra.png").write_bytes(b"x")
     problems = detect(md)
     assert any("extra.png" in p.message for p in problems)
+
+
+def test_image_placeholder_detected(tmp_path):
+    # MoE稀疏门控 4 处 <!-- image -->:转换器没抽图,不是孤儿 caption
+    md = tmp_path / "p.md"
+    md.write_text("# T\n正文\n<!-- image -->\n", encoding="utf-8")
+    problems = detect(md)
+    hits = [p for p in problems if "placeholder" in p.message]
+    assert len(hits) == 1 and hits[0].line == 3
+    assert "extract from PDF" in hits[0].message
+
+
+def test_image_placeholder_variants(tmp_path):
+    md = tmp_path / "p.md"
+    md.write_text("<!--image-->\n<!--  image  -->\n<!-- not image -->\n", encoding="utf-8")
+    problems = detect(md)
+    hits = [p for p in problems if "placeholder" in p.message]
+    assert len(hits) == 2  # 前两种是占位符,第三种不是
+
+
+def test_cluster_shared_caption_not_orphan(tmp_path):
+    # ZEDA:图→图→caption 共享:第二张图距 caption 3 行内,整簇算配对
+    md = _write_with_images(
+        tmp_path, "p.md",
+        "# T\n\n![a](images/a.png)\n![b](images/b.png)\nFigure 1: 共享图注\n",
+        imgs=("a.png", "b.png"),
+    )
+    problems = detect(md)
+    assert not any("no caption" in p.message for p in problems)
+
+
+def test_cluster_image_plus_label_line_shared_caption(tmp_path):
+    # ZEDA:图→标签行→caption
+    md = _write_with_images(
+        tmp_path, "p.md",
+        "# T\n\n![a](images/a.png)\n图注标签行\nFigure 2: 标签\n",
+        imgs=("a.png",),
+    )
+    problems = detect(md)
+    assert not any("no caption" in p.message for p in problems)
+
+
+def test_orphan_reports_nearest_caption_distance(tmp_path):
+    body = "![f](images/a.png)\n" + "\n".join(f"line{i}" for i in range(1, 15)) + "\nFigure 19: 远处\n"
+    md = _write_with_images(tmp_path, "p.md", body)
+    problems = detect(md)
+    orphans = [p for p in problems if "no caption" in p.message]
+    assert len(orphans) == 1
+    assert "nearest caption is" in orphans[0].message
+    assert "15 lines away" in orphans[0].message  # 图 line1,caption line16
+
+
+def test_far_cluster_still_orphan_each_reported(tmp_path):
+    # 相距很远的两张图各自无 caption → 各自报,都带距离
+    md = _write_with_images(
+        tmp_path, "p.md",
+        "# T\n\n![a](images/a.png)\n\n\n\n\n![b](images/b.png)\n\n\n\n\nFigure 9: 远\n",
+        imgs=("a.png", "b.png"),
+    )
+    problems = detect(md)
+    orphans = [p for p in problems if "no caption" in p.message]
+    assert len(orphans) == 2
+    assert all("nearest caption is" in p.message for p in orphans)
