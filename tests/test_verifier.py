@@ -96,6 +96,34 @@ def test_low_confidence_wrap_fires_on_actual_chem_output(tmp_path):
     assert len(low) == 2
 
 
+def test_low_confidence_wrap_clustered_by_token(tmp_path):
+    """2021B 的 $C_{4}$ 洪峰(184 条)必须聚成 1 条,不同 token 各自一条。"""
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text(
+        "关于 $C_{4}$ 与 $C_{4}$ 和 $C_{4}$ 的讨论\n以及 $V_{3}$ 的情况",
+        encoding="utf-8",
+    )
+    issues = verify_issues(md, ["chem_formula"])
+    low = [i for i in issues if "low-confidence" in i.message]
+    assert len(low) == 2
+    c4 = [i for i in low if "$C_{4}$" in i.message]
+    v3 = [i for i in low if "$V_{3}$" in i.message]
+    assert len(c4) == 1 and "×3" in c4[0].message and "line 1" in c4[0].message
+    assert len(v3) == 1 and v3[0].line == 2
+
+
+def test_low_confidence_wrap_single_occurrence_no_count_suffix(tmp_path):
+    from scripts.verifier import verify_issues
+
+    md = tmp_path / "p.md"
+    md.write_text("单独 $K_3$ 一次", encoding="utf-8")
+    issues = verify_issues(md, ["chem_formula"])
+    low = [i for i in issues if "low-confidence" in i.message]
+    assert len(low) == 1 and "×" not in low[0].message
+
+
 def test_chem_opportunity_neutral_wording_on_llm_doc(tmp_path):
     """LLM 文档的证据词("LLM"里就有 L!)不得把措辞升级为 likely chemistry。"""
     from scripts.verifier import verify_issues

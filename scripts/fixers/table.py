@@ -85,7 +85,8 @@ def detect(text: str) -> list:
         parser = _TableParser()
         parser.feed(table.group(0))
         message = (
-            "table with merged cells kept as HTML (needs agent)"
+            "table with merged cells kept as HTML (needs agent; $...$ inside "
+            "HTML tables does not render in Obsidian)"
             if parser.has_span
             else "unconverted HTML <table>"
         )

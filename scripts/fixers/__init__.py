@@ -5,11 +5,11 @@ joins the pipeline (postprocess) and the verifier's aggregated detect().
 """
 
 from scripts.fixers.base import Fixer, Issue
-from scripts.fixers import algorithm, chem_formula, code_fence, images, math_delim, ocr_cleanup, table, url_join
+from scripts.fixers import algorithm, chem_formula, code_fence, images, math_delim, ocr_cleanup, table, table_flatten, url_join
 
 __all__ = ["Fixer", "Issue", "register", "all_fixers", "select", "default_order"]
 
-_ORDER = ["table", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]
+_ORDER = ["table", "table_flatten", "chem_formula", "math_delim", "ocr_cleanup", "algorithm", "code_fence", "url_join", "images"]
 _REGISTRY: dict = {}
 
 
@@ -32,6 +32,9 @@ def default_order() -> list:
 
 
 register(Fixer("table", "HTML tables to Markdown", False, table.convert_html_tables, table.detect))
+# table_flatten is opt-in: MinerU span data can misalign, so its output is a
+# marked DRAFT — enable via --flatten-merged-tables (2021B vs MoE平衡).
+register(Fixer("table_flatten", "flatten merged-cell HTML tables (draft)", False, table_flatten.fix, table_flatten.detect, default_on=False))
 # chem_formula is opt-in since v2: subscripts are a chemistry-domain change most
 # CS/AI/math/physics papers do not want; select via --fixers chem_formula.
 register(Fixer("chem_formula", "chemical formula subscripts", False, chem_formula.fix, chem_formula.detect, default_on=False))

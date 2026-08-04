@@ -17,16 +17,19 @@ from scripts.fixers import all_fixers, default_order, select
 from scripts.textio import read_text_preserve, write_text_preserve
 
 
-def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None) -> list:
+def _resolve_fixer_ids(fixers_arg: str | None, skip_arg: str | None, flatten_tables: bool = False) -> list:
     """Compute the ordered fixer id list from --fixers / --skip.
 
     No --fixers: the default set is only default_on fixers (chem_formula is
     opt-in since v2). Explicit --fixers selects exactly what it names.
+    --flatten-merged-tables appends table_flatten (opt-in draft output).
     """
     if fixers_arg:
         ids = [s.strip() for s in fixers_arg.split(",") if s.strip()]
     else:
         ids = [f.id for f in all_fixers() if f.default_on]
+    if flatten_tables and "table_flatten" not in ids:
+        ids.append("table_flatten")
     if skip_arg:
         skip = {s.strip() for s in skip_arg.split(",") if s.strip()}
         ids = [i for i in ids if i not in skip]
@@ -142,6 +145,8 @@ def main(argv=None) -> int:
                         help="target directory name for copied images, relative to the md (default: images)")
     parser.add_argument("--in-place", action="store_true",
                         help="overwrite the input file (a .bak backup is created)")
+    parser.add_argument("--flatten-merged-tables", action="store_true",
+                        help="flatten HTML tables with merged cells into Markdown (draft, verify against PDF)")
     parser.add_argument("--verify", action="store_true",
                         help="verify only: report issues, write nothing (exit 0=clean, 2=issues)")
     parser.add_argument("--dry-run", action="store_true",
@@ -158,7 +163,7 @@ def main(argv=None) -> int:
         print(f"Error: unsupported input type '{args.input.suffix}', expected .md", file=sys.stderr)
         return 1
 
-    fixer_ids = _resolve_fixer_ids(args.fixers, args.skip)
+    fixer_ids = _resolve_fixer_ids(args.fixers, args.skip, args.flatten_merged_tables)
 
     if args.verify:
         problems = verifier.verify_issues(args.input, fixer_ids)
@@ -187,7 +192,9 @@ def main(argv=None) -> int:
             )
         return 0
 
-    target, problems = _run_fix_mode(args.input, args.in_place, fixer_ids, args.images_dir, args.images_out_dir)
+    target, problems = _run_fix_mode(
+        args.input, args.in_place, fixer_ids, args.images_dir, args.images_out_dir
+    )
     if args.issues_json:
         _write_issues_json(args.issues_json, problems)
     print(f"Re-run: python -m scripts.postprocess {_rerun_args(args)}")
@@ -216,6 +223,8 @@ def _rerun_args(args) -> str:
         parts += ["--images-out-dir", f'"{args.images_out_dir}"']
     if args.in_place:
         parts.append("--in-place")
+    if args.flatten_merged_tables:
+        parts.append("--flatten-merged-tables")
     if args.issues_json:
         parts += ["--issues-json", f'"{args.issues_json}"']
     return " ".join(parts)

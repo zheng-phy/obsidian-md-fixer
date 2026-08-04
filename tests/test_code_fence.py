@@ -116,3 +116,22 @@ def test_detect_normal_python_block_no_structure_issues():
         "labeled" in p.message or "fragmented" in p.message or "no indentation" in p.message
         for p in problems
     )
+
+
+def test_detect_ipynb_fragments():
+    # 转换器把原始 ipynb JSON 行直接倾倒进 md
+    text = '"cell_type": "markdown"\n"source": ["# 标题"]\n"n": 3,\n"cell_type": "code"'
+    problems = detect(text)
+    hits = [p for p in problems if "Jupyter notebook fragments" in p.message]
+    assert len(hits) == 1
+    assert "rebuild from original ipynb" in hits[0].message
+
+
+def test_detect_ipynb_single_line_not_reported():
+    # 只有一行命中不报(≥2 行才构成碎片迹象)
+    assert not any("Jupyter notebook fragments" in p.message for p in detect('"cell_type": "code"'))
+
+
+def test_detect_ipynb_ignores_inside_fence():
+    text = "```json\n\"cell_type\": \"code\"\n\"source\": []\n```\n"
+    assert not any("Jupyter notebook fragments" in p.message for p in detect(text))

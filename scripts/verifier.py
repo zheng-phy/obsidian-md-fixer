@@ -64,21 +64,30 @@ _LOW_CONFIDENCE_WRAP_RE = re.compile(r"^\$([A-Z][a-z]?)_\{?\d+\}?\$$")
 
 
 def _low_confidence_wraps(text: str) -> list:
-    """Report single-element wraps in math zones (run only with chem_formula)."""
+    """Report single-element wraps in math zones (run only with chem_formula).
+
+    Same-shape tokens cluster into one issue (2021B: $C_{4}$ ×184 was a
+    184-line flood); different tokens stay separate.
+    """
     problems: list = []
+    counts: dict = {}
+    first_line: dict = {}
     pos = 0
     for kind, seg in split_zones(text):
         if kind == "math":
             m = _LOW_CONFIDENCE_WRAP_RE.match(seg)
             if m:
+                token = m.group(0)
                 line = text[:pos].count("\n") + 1
-                problems.append(Issue(
-                    "chem_formula",
-                    line,
-                    f"low-confidence wrap: {m.group(0)} — verify formula vs "
-                    "name/label (single element + digits)",
-                ))
+                counts[token] = counts.get(token, 0) + 1
+                first_line.setdefault(token, line)
         pos += len(seg)
+    for token, count in counts.items():
+        msg = f"low-confidence wrap: {token}"
+        if count > 1:
+            msg += f" ×{count} (first at line {first_line[token]})"
+        msg += " — verify formula vs name/label (single element + digits)"
+        problems.append(Issue("chem_formula", first_line[token], msg))
     return problems
 
 

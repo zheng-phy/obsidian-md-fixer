@@ -10,7 +10,9 @@ from pathlib import Path, PurePosixPath
 
 from scripts.textio import read_text_preserve, write_text_preserve
 
-_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+# Path may contain one level of nested parens (谷歌MoE 目录 "(flash实测)");
+# without it the reference would truncate at the first ')'.
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))+)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s")
 # Caption window: ±3 lines covers blank-line variants while keeping figures
 # from cross-talking; detect-only, so err tight.
@@ -20,33 +22,48 @@ _CAPTION_CN_RE = re.compile(r"^\s*图\s*\d+")
 _CAPTION_CN_MAX_LEN = 40  # longer lines are prose mentions, not captions
 # B196 "## 利润值/元": axis label mis-tagged as a heading.
 _AXIS_HEADING_RE = re.compile(r"^#{1,6}\s*\S{1,12}/(元|秒|米|千克|个|件|%|kg|cm|mm|m|s)$")
+# MoE稀疏门控: converter emits <!-- image --> where it did not extract images.
+_IMAGE_PLACEHOLDER_RE = re.compile(r"<!--\s*image\s*-->", re.IGNORECASE)
 
 
 def organize(md_path: Path, source_images_dir: Path, out_dir_name: str = "images") -> None:
     """Copy images from source dir into <md_dir>/<out_dir_name>/ and fix paths.
 
     out_dir_name is relative to the md (default "images"; K3 parses need
-    "Image/"), and the reference rewrite uses the same name.
+    "Image/"), and the reference rewrite uses the same name. References are
+    rewritten to relative POSIX paths and only for files actually copied.
     """
+    import os
+
     md_path = Path(md_path)
     source_images_dir = Path(source_images_dir)
     target_dir = md_path.parent / out_dir_name
 
+    copied: set = set()
     if source_images_dir.is_dir() and source_images_dir.resolve() != target_dir.resolve():
-        target_dir.mkdir(exist_ok=True)
+        target_dir.mkdir(parents=True, exist_ok=True)
         for img in source_images_dir.iterdir():
             if img.is_file():
                 shutil.copy2(img, target_dir / img.name)
+                copied.add(img.name)
 
     text, newline = read_text_preserve(md_path)
 
-    def _rewrite(match: re.Match) -> str:
-        alt, path = match.group(1), match.group(2)
-        if path.startswith(("http://", "https://")):
-            return match.group(0)
-        return f"![{alt}]({out_dir_name}/{Path(path).name})"
+    if copied:
+        rel_prefix = Path(os.path.relpath(target_dir, md_path.parent)).as_posix()
 
-    write_text_preserve(md_path, _MD_IMAGE_RE.sub(_rewrite, text), newline)
+        def _rewrite(match: re.Match) -> str:
+            alt, path = match.group(1), match.group(2)
+            if path.startswith(("http://", "https://")):
+                return match.group(0)
+            name = Path(path).name
+            if name not in copied:
+                return match.group(0)  # not copied: leave verbatim (detect still nets it)
+            return f"![{alt}]({rel_prefix}/{name})"
+
+        text = _MD_IMAGE_RE.sub(_rewrite, text)
+
+    write_text_preserve(md_path, text, newline)
 
 
 def detect(md_path: Path) -> list:
@@ -82,9 +99,20 @@ def detect(md_path: Path) -> list:
             problems.append(
                 Issue("images", i, "possible axis label mis-tagged as heading")
             )
+        if _IMAGE_PLACEHOLDER_RE.search(line):
+            problems.append(
+                Issue(
+                    "images",
+                    i,
+                    "image placeholder (converter did not extract images) — "
+                    "extract from PDF or re-convert with an image-producing API",
+                )
+            )
 
-    # Figure-caption pairing within ±3 lines (detect-only).
-    image_lines = {i for i, line in enumerate(lines, 1) if _MD_IMAGE_RE.search(line)}
+    # Figure-caption pairing within ±3 lines (detect-only). Adjacent image
+    # lines (gap <= 2) form a cluster; one caption near ANY member pairs the
+    # whole cluster (ZEDA: 图→图→caption 共享 / 图→标签行→caption).
+    image_lines = sorted({i for i, line in enumerate(lines, 1) if _MD_IMAGE_RE.search(line)})
     caption_lines: dict = {}
     for i, line in enumerate(lines, 1):
         is_en = bool(_CAPTION_EN_RE.match(line))
@@ -98,16 +126,28 @@ def detect(md_path: Path) -> list:
             if num:
                 caption_lines[i] = int(num.group(0))
 
-    for img in sorted(image_lines):
-        if not any(abs(img - c) <= _CAPTION_WINDOW for c in caption_lines):
-            problems.append(
-                Issue(
-                    "images",
-                    img,
-                    "image has no caption within ±3 lines "
-                    "(possible orphan/misplaced figure)",
-                )
-            )
+    clusters: list = []
+    for img in image_lines:
+        if clusters and img - clusters[-1][-1] <= 2:
+            clusters[-1].append(img)
+        else:
+            clusters.append([img])
+
+    for cluster in clusters:
+        paired = any(
+            abs(img - c) <= _CAPTION_WINDOW
+            for img in cluster
+            for c in caption_lines
+        )
+        if paired:
+            continue
+        for img in cluster:
+            nearest = min((abs(img - c) for c in caption_lines), default=None)
+            message = "image has no caption within ±3 lines " \
+                      "(possible orphan/misplaced figure)"
+            if nearest is not None:
+                message += f" — nearest caption is {nearest} lines away"
+            problems.append(Issue("images", img, message))
     paired_nums: list = []
     for c, num in sorted(caption_lines.items()):
         if any(abs(c - im) <= _CAPTION_WINDOW for im in image_lines):
