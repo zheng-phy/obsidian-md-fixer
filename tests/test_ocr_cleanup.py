@@ -168,19 +168,33 @@ def test_detect_fffd_skipped_in_code_fence():
         ("specication", "specification"),
         ("conguration", "configuration"),
         ("proling", "profiling"),
+        ("efects", "effects"),
+        ("eects", "effects"),
     ],
 )
 def test_ligature_dict_entries(bad, good):
     assert fix(f"the {bad} here") == f"the {good} here"
 
 
+def test_ligature_capitalized_fixed():
+    # 大写变体:Dificult/Eficient 首字母大写同样修复,保留大写
+    assert fix("Eficient method") == "Efficient method"
+    assert fix("Dificult to say") == "Difficult to say"
+
+
+def test_ligature_ofer_capitalized_untouched():
+    # 专名风险条目豁免大写:人名 Ofer 不得改,小写 ofer 照常修
+    assert fix("Ofer and Smith") == "Ofer and Smith"
+    assert fix("ofer help") == "offer help"
+
+
 def test_ligature_correct_word_untouched():
     assert fix("very effective offline profiling") == "very effective offline profiling"
 
 
-def test_ligature_capitalized_untouched():
-    # 仅全小写匹配:Dificult 不碰
-    assert fix("Dificult to say") == "Dificult to say"
+def test_ligature_capitalized_untouched_when_unknown():
+    # 词典外的大写形式(DificulT 之类)不碰
+    assert fix("DificulT to say") == "DificulT to say"
 
 
 def test_ligature_not_in_code_fence():
@@ -250,3 +264,65 @@ def test_detect_still_reports_control_in_code_fence():
 def test_detect_clean_after_fix():
     problems = detect(fix("正文\x0b字符 $a\x08b$"))
     assert not any("control char" in p.message for p in problems)
+
+
+# --- 正文错形小词典(detect-only,MoE稀疏门控 实证)---
+
+@pytest.mark.parametrize(
+    "bad,good",
+    [
+        ("sof tmax", "softmax"),
+        ("wtih", "with"),
+        ("drouput", "dropout"),
+        ("dropP rob", "DropProb"),
+        ("trillionparameter", "trillion parameter"),
+        ("multiply-andadds", "multiply-and-adds"),
+    ],
+)
+def test_detect_suspicious_word_forms(bad, good):
+    problems = detect(f"a {bad} b")
+    hits = [p for p in problems if "suspicious word form" in p.message]
+    assert len(hits) == 1, (bad, problems)
+    assert f"maybe '{good}'" in hits[0].message
+
+
+def test_detect_word_form_not_in_math():
+    problems = detect("$wtih$")
+    assert not any("suspicious word form" in p.message for p in problems)
+
+
+def test_detect_word_form_does_not_fix():
+    # detect-only:只报不改
+    assert fix("models wtih no MoE") == "models wtih no MoE"
+
+
+def test_detect_word_form_clean():
+    assert not any("suspicious word form" in p.message for p in detect("the softmax with dropout"))
+
+
+# --- 相邻 letter-run 聚合提示(MoE: k t h \_ excluding 是同一标识符)---
+
+def test_detect_identifier_split_hint():
+    problems = detect("$k t h \\_ excluding (H)$")
+    hits = [p for p in problems if "possible same identifier" in p.message]
+    assert len(hits) == 1
+    assert "'k t h' + 'excluding'" in hits[0].message
+
+
+def test_detect_identifier_split_spaced_long_ident():
+    # 长标识符仍是字母+空格形态(e x c l u d i n g)也命中,展示时去空格
+    problems = detect("$k t h \\_ e x c l u d i n g$")
+    hits = [p for p in problems if "possible same identifier" in p.message]
+    assert len(hits) == 1
+    assert "'k t h' + 'excluding'" in hits[0].message
+
+
+def test_detect_identifier_split_underscore_separator():
+    problems = detect("$k t h _ excluding$")
+    assert any("possible same identifier" in p.message for p in problems)
+
+
+def test_detect_identifier_split_far_apart_not_reported():
+    # 中间隔着别的 token:不算相邻
+    problems = detect("$k t h = f ( x ) + excluding$")
+    assert not any("possible same identifier" in p.message for p in problems)

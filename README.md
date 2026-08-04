@@ -84,6 +84,12 @@ python -m scripts.postprocess paper.md --images-dir "D:/mineru输出/images"
 # 输出目录名(默认 images;如需要 Image/ 时用)
 python -m scripts.postprocess paper.md --images-out-dir Image
 
+# 从 MinerU content_list_v2.json 恢复 U+FFFD(骨架唯一对齐,对齐不了的报残留)
+python -m scripts.postprocess paper.md --content-list "D:/mineru输出/content_list_v2.json"
+
+# 合并单元格表(HTML)展平为 Markdown 草稿(opt-in;每个表带 verify against PDF 标记)
+python -m scripts.postprocess paper.md --flatten-merged-tables
+
 # 原地修复(自动创建 paper.md.bak 备份)
 python -m scripts.postprocess paper.md --in-place
 
@@ -100,14 +106,16 @@ python -m scripts.fixers.table paper.md
 
 | 修复器 | 说明 |
 |------|------|
-| `table` | HTML `<table>` → Markdown 表格，单元格内 LaTeX 公式保留 |
+| `fffd_restore` | 从 MinerU `content_list_v2.json` 恢复 `�`（U+FFFD）：骨架**唯一**对齐才回填，绝不臆造；无 `--content-list` 时自动跳过，对齐不了的行报残留 |
+| `table` | HTML `<table>` → Markdown 表格，单元格内 LaTeX 公式保留；合并单元格表保留 HTML 并报 detect（表内 `$...$` 在 Obsidian 不渲染） |
+| `table_flatten`（可选，opt-in） | 合并单元格表（rowspan/colspan）展平为 Markdown 草稿（复合列名、span 填充）；每个表带 `verify against PDF` 标记，`--flatten-merged-tables` 启用 |
 | `chem_formula`（可选，opt-in） | `SiO2` → `$SiO_{2}$`、`C6H12O6` → `$C_{6}H_{12}O_{6}$`；118 元素周期表校验 + 数字必需，`GPT2`/`MoE`/`LoRA`/`Sv2` 等绝不误伤；仅化学/材料文档显式开启 |
-| `math_delim` | `<eq>` 标签 → `$...$`；成对 `\(...\)` → `$...$`；断裂 `\(...` 降级为纯文本（杜绝 ParseError)；detect 报行内公式降级（`X\~B(`、`0<p<1`）与乱码公式 |
-| `ocr_cleanup` | 确定性 OCR 噪音：`\mathrm` 字母空格、`f^{\backslash…*}`、数字拆散、HTML 实体、ff 连字词典（dificulty→difficulty）；detect 报 U+FFFD、控制字符、元组下标、字母并跑 |
+| `math_delim` | `<eq>` 标签 → `$...$`；成对 `\(...\)` → `$...$`；`\[...\]` 显示公式 → `$$...$$`；断裂 `\(...` 降级为纯文本（杜绝 ParseError)；text 段数字区间 `\~` → `~`；detect 报行内公式降级（`X\~B(`、`0<p<1`）与乱码公式 |
+| `ocr_cleanup` | 确定性 OCR 噪音：`\mathrm` 字母空格、`f^{\backslash…*}`、数字拆散、HTML 实体、C0 控制字符清除、ff 连字词典（dificulty→difficulty，含大写变体）；detect 报 U+FFFD、元组下标、字母并跑、正文错形（`wtih`）、标识符拆开（`k t h \_ excluding`） |
 | `algorithm` | MinerU algorithm div 转换：锚点行进代码块，含数学的伪代码整段回正文（公式恢复渲染） |
-| `code_fence` | 缺 ``` 围栏的高置信代码包块（已有围栏零改动）；detect 报围栏语言误标/碎片化/缩进丢失 |
+| `code_fence` | 缺 ``` 围栏的高置信代码包块（已有围栏零改动）；detect 报围栏语言误标/碎片化/缩进丢失/ipynb 碎片 |
 | `url_join` | 同行断 URL 接合（`arxiv.org/abs/ 2601.05808` → 完整 URL)；跨行断 URL 只报不改 |
-| `images` | 图片**复制**（非移动）到 `.md` 同级目录并修复引用路径（`--images-out-dir` 可改目录名）；detect 报缺失图、图-图注分离、图序异常、未引用图、轴标签误标 |
+| `images` | 图片**复制**（非移动）到 `.md` 同级目录并修复引用路径（相对 POSIX 路径、容忍括号目录名，`--images-out-dir` 可改目录名）；detect 报缺失图、图-图注分离（含簇共享图注与距离信息）、图序异常、未引用图、轴标签误标、`<!-- image -->` 占位符 |
 
 **机械修复 vs 语义修复**：修复器只做"机械可判"的修复。上下标语义（`Sv2` 是 `Sv²` 还是 `Sv₂`)、断句、图序这类需要理解上下文的问题，由 verifier 以带行号的清单报出，交给 Agent 阅读后修复——不碰确定性工具不敢判断的部分。换行符（CRLF/LF）逐字节保留，不因修复改变。
 
@@ -117,7 +125,7 @@ python -m scripts.fixers.table paper.md
 python -m pytest tests/ -v
 ```
 
-290+ 个单元测试覆盖全部修复器、注册表、编排器与边界（含中文/空格路径、换行符保留）。设计文档见 [DESIGN.md](DESIGN.md)（含 v2.0.0 转型决策记录）。
+290+ 个单元测试覆盖全部修复器、注册表、编排器与边界（含中文/空格路径、换行符保留）。设计文档见 [DESIGN.md](DESIGN.md)（含 v2.0.0 转型与 v2.1.0 决策记录）。
 
 ## 隐私说明
 

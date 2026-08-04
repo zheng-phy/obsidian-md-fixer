@@ -103,6 +103,8 @@ _FENCE_CLOSE_RE = re.compile(r"^```\s*$")
 _KEYWORD_LINE_RE = re.compile(r"^\s*(def\s|for\s|if\s)")
 _SHORT_GAP_LEN = 20  # lines between fragmented fences may be blank or short
 _INDENT_LOSS_MIN_LINES = 8
+# Jupyter ipynb JSON lines a converter dumped into the md body.
+_IPYNB_LINE_RE = re.compile(r'"cell_type"|"source"\s*:|^\s*"n"\s*,?$')
 
 
 def _fence_blocks(lines: list) -> list:
@@ -144,6 +146,7 @@ def detect(text: str) -> list:
     problems = []
     lines = text.split("\n")
     lineno = 0
+    ipynb_hits: list = []
     for in_fence, run in _split_fence_runs(lines):
         if in_fence:
             lineno += len(run)
@@ -152,6 +155,15 @@ def detect(text: str) -> list:
             lineno += 1
             if _is_anchor(ln):
                 problems.append(Issue("code_fence", lineno, f"suspected code block (needs agent review): {ln.strip()[:40]}"))
+            if _IPYNB_LINE_RE.search(ln):
+                ipynb_hits.append(lineno)
+    if len(ipynb_hits) >= 2:
+        problems.append(Issue(
+            "code_fence",
+            ipynb_hits[0],
+            "suspected Jupyter notebook fragments — rebuild from original "
+            "ipynb (converter-layer task)",
+        ))
 
     blocks = _fence_blocks(lines)
     for idx, (start, lang, content) in enumerate(blocks):

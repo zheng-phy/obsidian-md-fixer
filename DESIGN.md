@@ -54,14 +54,16 @@ obsidian-md-fixer/
 │   └── fixers/
 │       ├── __init__.py      # 注册表:register / all_fixers / select / default_order
 │       ├── base.py          # Issue / Fixer 协议 + split_zones 共享保护区
+│       ├── fffd_restore.py  # U+FFFD 从 MinerU content_list JSON 骨架唯一还原(file_based)
 │       ├── table.py         # HTML 表格 → Markdown 表格
+│       ├── table_flatten.py # 合并单元格表展平(opt-in 草稿 + 标记)
 │       ├── chem_formula.py  # 化学式下标(opt-in,周期表校验)
-│       ├── math_delim.py    # <eq>/\(...\)/$ 定界符 + \tag 缺陷 + 降级/乱码 detect
-│       ├── ocr_cleanup.py   # 确定性 OCR 噪音(A 类)+ 连字词典 + U+FFFD/控制字符 detect
+│       ├── math_delim.py    # <eq>/\(...\)/\[...\]/$ 定界符 + \tag 缺陷 + 降级/乱码 detect
+│       ├── ocr_cleanup.py   # 确定性 OCR 噪音(A 类)+ 连字词典 + 错形小词典 + U+FFFD/控制字符
 │       ├── algorithm.py     # mineru-algorithm div 转换(含数学 run 转正文)
-│       ├── code_fence.py    # 未包代码块的代码识别包块(围栏感知)+ 结构 detect
+│       ├── code_fence.py    # 未包代码块的代码识别包块(围栏感知)+ 结构/ipynb 碎片 detect
 │       ├── url_join.py      # 同行断 URL 接合(跨行只报)
-│       └── images.py        # 图片复制与引用重写 + 图-图注配对/图包审计
+│       └── images.py        # 图片复制与引用重写 + 图-图注配对/图包审计/占位符
 ├── tests/                   # pytest 单元测试(镜像 scripts 结构)
 ├── .gitignore
 ├── .gitattributes
@@ -122,11 +124,20 @@ verifier 聚合各 fixer.detect → 带行号 Issue 清单(洪峰折叠;化学�
 
 HTML `<table>` → Markdown 管道表格（stdlib HTMLParser，首行作表头）。单元格内 `$...$` 公式原样保留。detect：逐行报残留 `<table>`。
 
-**合并单元格（rowspan/colspan)——不静默误改**：Markdown 表格不支持合并单元格。`_TableParser` 检测到任一 `<td>/<th>` 带 `rowspan` 或 `colspan` 时，**不转换该表**，保留原 HTML 并报 detect 警告（带行号）。告警后由 Agent 按"三档框架"修复（见 §6.3 Workflow):
+**合并单元格（rowspan/colspan)——不静默误改**：Markdown 表格不支持合并单元格。`_TableParser` 检测到任一 `<td>/<th>` 带 `rowspan` 或 `colspan` 时，**不转换该表**，保留原 HTML 并报 detect 警告（带行号；v2.1.0 起文案补充"HTML 表内 `$...$` 在 Obsidian 不渲染"——HTML 表是保护区，其内公式 MathJax 看不到）。告警后由 Agent 按"三档框架"修复（见 §6.3 Workflow):
 1. **展平表头**（首选）：多级表头合并为单行复合列名，跨行单元格向下复制填充——信息无损时优先
 2. **拆成多个表**：按主表头拆成几个独立单层表——展平后列名过冗时用
 3. **保留 HTML + 注明**（兜底）：无法无损转换时留 HTML，上方注明"本表含合并单元格，建议查看原 PDF"
 Agent 在框架内按文义选档，不发明其他转法。
+
+### 4.1.1 table_flatten（合并单元格表展平，v2.1.0 起 opt-in）
+
+**默认不启用**（`default_on=False`，经 `--flatten-merged-tables` 开启）：MinerU 的 rowspan/colspan 数据本身可能错位（MoE稀疏门控 实测警告），展平产物是**草稿**而非成品。启用后，`table` 保留为 HTML 的 span 表全部经本 fixer 展开为 Markdown 管道表：
+
+- **span 网格展开**：每单元格解析 (text, rowspan, colspan)；rowspan 文本向下填充、colspan 向右填充，构建完整矩形网格（表内公式 `$...$` 原样保留——这正是保留 HTML 的痛点：公式在 Obsidian 不渲染）。
+- **表头重建**：表头行数 = 第 0 行任一格的 span 覆盖到的最大行（无则 1）；colspan-only 组表头（B026 表11 形态：组标签行 + 列标签行）识别为 2 行。多行表头按列纵向拼接非空文本（空格连接）为复合列名（`未标准化系数 B`）；同名列加序号（`乙醇转化率 排序 (2)`）；空列名补 `列N`。
+- **草稿标记**：每个展平表上方加 `<!-- auto-flattened from merged-cell table — verify against PDF -->`，detect 逐表报 `flattened merged-cell table (draft) — verify against PDF`——**必须对账**（B007 表8 回归系数表、B026 表11 排序表两个真实 fixture 有测试与人工核对版）。
+- **平衡**：MoE稀疏门控 要求保守（span 数据错位风险）vs 2021B 要求半成品可用（三线表多）——opt-in + 标记 + 对账指令是两者的交点，D8。
 
 ### 4.2 chem_formula（v2.0.0 起 opt-in）
 
@@ -148,12 +159,17 @@ Agent 在框架内按文义选档，不发明其他转法。
 ### 4.3 math_delim
 
 定界符统一为 Obsidian 认的 `$...$`:
+- `\[...\]` 显示公式 → `$$...$$`（v2.1.0：Obsidian 按 CommonMark 剥掉 `\[` 的反斜杠，MathJax 看不到公式——T1 24 处实证；`detect` 对残留 `\[`/`\]` 报"leftover"）
 - `<eq>...</eq>` → `$...$`
 - 成对 `\(...\)` → `$...$`
-- 断裂 `\(...`（无配对 `\)`)→ 降级为纯文本（杜绝 ParseError)
+- 断裂 `\(...`（无配对 `\))`→ 降级为纯文本（杜绝 ParseError)
 - `\tag` 缺陷 detect:`\tag{...}` 内括号不配平、混入游离括号、裸 `~`（数学模式下渲染为空格，公式编号区间误拼）
 
-只在 `text`/`eq` 段操作，不触碰已有 `$...$` 数学内容。
+只在 `text`/`eq` 段操作，不触碰已有 `$...$` 数学内容；code fence 内不动。
+
+**garbled 乱码判定的修正（v2.1.0）**：`_bare_eq_count` 计数前先剔除 `_{...}`/`^{...}` 花括号内容——`\sum_{i = 1}^{n}` 的 `i = 1` 是下标不是乱码（MoE稀疏门控 6 条误报清零）；真乱码 `$= 1 = 1 1$` 仍报。
+
+**数字区间 `\~`（v2.1.0）**：text 段内 `(?<=[\d%])\~(?=[\d%])` → `~`（2021B 实样 `36%\~41%`——计划原定 `(?<=\d)` 与实样不符，`%` 语境一并覆盖）；字母语境 `X\~B(` 不动，仍走降级 detect。
 
 **`$` 配对检查（verifier 侧）的两个修正**:
 - **转义美元符号 `\$` 跳过**：金额写法 `\$2.03` 不计入 `$` 配对——扫描时排除被反斜杠转义的 `\$`，不再误报"Unpaired $ delimiters"。
@@ -170,10 +186,12 @@ Agent 在框架内按文义选档，不发明其他转法。
 | 数字拆散（`0. 2 0`→`0.20`) | 删数字间空格 | **仅** ①`$...$` ②`$$...$$` ③白名单命令花括号内 |
 | HTML 实体（`&gt; &lt; &amp; &quot;`) | 固定映射 | text + math zone（v2 起 math 区也替换，B157） |
 | 多位数下标元组（`X_{1 16}`) | **不静默合并**：stash 保护后原样保留 | math zone |
+| array 列说明符（`\begin{array}{r l r}`) | **豁免** letter-run 处理（stash/blank，v2.1.0，MoE 误报清零） | math zone |
 | 数学区字母拆散（`a l l o w e d`→`allowed`) | ≥5 个单字母并跑合并；2 个（`x y` 变量对）不动 | math zone |
-| ff 连字词典（`dificulty`→`difficulty` 等 22 条） | 封闭词典，全小写词边界，绝不误伤合法词形（`of` 剔除） | text zone |
+| ff 连字词典（`dificulty`→`difficulty` 等 24 条） | 封闭词典，词边界；**小写 + 首字母大写**变体都修（`Eficient→Efficient`），保留匹配形态；**专名风险条目豁免大写**（`ofer` 仅小写，人名 Ofer 不碰） | text zone |
+| C0 控制字符（`\x00-\x08\x0b\x0c\x0e-\x1f`) | **直接删除**（md 中绝不合法，B026 U+000B 来自 `\vdots` 转义损坏）；code 区不动 | text + math zone |
 
-**B 类（语义级）只做 detect 不改**：希腊字母 `??` 占位符；`X_{1 16}` 元组下标（报"space-separated numbers … review"）；3-4 字母并跑（`a b c`，报"letter-run … review"）；**U+FFFD 替换符**（`�`，报"restore from PDF"，同行一条）；**C0 控制字符**（`\x08` 等，报 `control char U+00XX`）。U+FFFD/控制字符只在 text/math 段报，code 段跳过。
+**B 类（语义级）只做 detect 不改**：希腊字母 `??` 占位符；`X_{1 16}` 元组下标（报"space-separated numbers … review"）；3-4 字母并跑（`a b c`，报"letter-run … review"）；**U+FFFD 替换符**（`�`，报"restore from PDF"，同行一条）；**C0 控制字符**（修复器删 text/math 区，code 区修不到所以 detect 照报）；**正文错形小词典**（v2.1.0，封闭小表逐条注样本出处：`wtih→with`、`drouput→dropout`、`trillionparameter→trillion parameter`、`multiply-andadds→multiply-and-adds`（MoE稀疏门控 各 3 处）、`sof tmax→softmax`、`dropP rob→DropProb`（计划指定，样本未复现）——报 `suspicious word form: 'wtih' — maybe 'with' (review)`，**只报不改**，人名/专名不收）；**相邻 letter-run 聚合**（v2.1.0，math 段 3-4 run 与相邻 ≥5 字母标识符仅隔 `\_`/`_`/空白 → `possible same identifier: 'k t h' + 'excluding' (review)`——MoE 实证 `k t h \_ e x c l u d i n g` 是同一标识符被 OCR 拆开）。U+FFFD/控制字符只在 text/math 段报（修复后只剩 code 区可报）。
 
 ### 4.5 algorithm(mineru-algorithm div 转换）
 
@@ -198,19 +216,23 @@ MinerU 偶尔把代码段降级为普通文本（缺 ``` 围栏，如 `import nu
 - **以下任一情况只 detect 上报、不包块**：锚点行混入 `$...$`（公式与代码纠缠）；锚点行混入中文句子（可能是正文提及代码）；孤立单锚点行；语言/边界不明确。
 - 上报格式：`[code_fence] line N: suspected code block (needs agent review)` + 首行摘录，交 Agent 判断。
 - **代码结构三检测（v2，detect-only）**：①围栏开标签 ∈ `{prolog,txt,makefile,lua}` 且块内 ≥2 行命中锚点正则 → "fence labeled 'X' but content looks like python"（K3 形态）；②闭围栏后 ≤3 行（仅空行/短行间隔）又现开围栏 → "adjacent fragmented fences (possible pagination split)"；③围栏块 ≥8 行、含 `def |for |if ` 且所有行首无缩进 → "code block has no indentation (possible indent loss)"。全部带行号、只上报。
+- **ipynb 碎片检测（v2.1.0，detect-only）**：围栏外 ≥2 行命中 `"cell_type"`/`"source":`/`^\s*"n",?$` → "suspected Jupyter notebook fragments — rebuild from original ipynb (converter-layer task)"——转换器把原始 ipynb JSON 行倾倒进 md，逐行重建是转换层的事，不包块。
 
 ### 4.7 images(file_based=True)
 
 图片**复制**（非移动）到 `.md` 同级目录，并把本地引用重写。外部 URL(http/https）不动。
 
 - 图源目录是参数（`organize(md_path, source_images_dir, out_dir_name="images")`)，可用 `--images-dir` 指定（如 MinerU 图包位置）；**输出目录名**用 `--images-out-dir NAME` 指定（默认 `images`，K3 解析需要 `Image/`），引用重写同步用该名。
+- **organize 三连修（v2.1.0）**：①`mkdir(parents=True, exist_ok=True)`（谷歌MoE 深层目录 WinError 3）；②引用一律重写为**相对 md 的 POSIX 路径**（`os.path.relpath` + 正斜杠 + `/name`，绝对引用根除——`--images-out-dir` 传绝对路径也产出可移植引用）；③**只重写实际复制成功的文件的引用**（training-04：图本就在 md 旁、无图源目录时引用被改断；未复制的引用原样保留，missing-image detect 兜底）。
+- **引用正则容忍一层嵌套括号（v2.1.0，三连环根因）**：`_MD_IMAGE_RE` 与 zone 正则的路径部分从 `[^)]*` 改为 `(?:[^()]|\([^()]*\))*`——目录名含 `(flash实测)` 曾致路径截断 → missing-image 误报 21 条 + 图包审计目录被污染（19 张孤儿代码截图漏报）；link zone 同修（wikipedia 式 URL）。
 - **边界**：只能修"引用路径"，不能恢复图片本体缺失。图片缺失时 verifier 报告并引导用户用能导图的转换器（如 MinerU Standard API）重转。
 - detect：
   - 报缺失图片（带行号）
   - **图文分离 detect**：图片引用出现在第一个 `#` 标题**之前** → 上报 Agent（不自动挪位）
-  - **图-图注配对（v2，K=3）**：`_CAPTION_WINDOW=3`（覆盖空行变体、防跨图串扰，detect-only 宁紧）。①图片行 ±3 内无图注 → "image has no caption … possible orphan/misplaced figure"；②图注行 ±3 内无图 → "caption has no image … possible orphan caption"；③通过①+②配对确认的图注编号序列非单调 → "possible figure order anomaly … verify visually"（整条一次）。图注识别：英文 `Figure N:`/`Fig. N`/`Fig N`；中文 `图 N` 且行长 ≤40 且不以 `。` 结尾（排除"图 5 给出了……。"正文提及）
+  - **图-图注配对（v2，K=3；v2.1.0 加簇收敛）**：`_CAPTION_WINDOW=3`（覆盖空行变体、防跨图串扰，detect-only 宁紧）。**图片簇**：相邻图片行（行距 ≤2）构成一簇；簇内任一图片 ±3 内有图注 → 整簇算配对（ZEDA：图→图→caption 共享、图→标签行→caption）。未配对时每张图报 "image has no caption … possible orphan/misplaced figure"，**附最近图注距离**（"nearest caption is N lines away"）；②图注行 ±3 内无图 → "caption has no image … possible orphan caption"；③配对确认的图注编号序列非单调 → "possible figure order anomaly … verify visually"（整条一次）。图注识别：英文 `Figure N:`/`Fig. N`/`Fig N`；中文 `图 N` 且行长 ≤40 且不以 `。` 结尾（排除"图 5 给出了……。"正文提及）
   - **图包未引用图审计（v2）**：读 `<md_dir>/images/`（不存在则静默跳过），集合差 `图包文件名 - 被引用 basename`，每个未引用文件一条"unreferenced image in bundle (possible missing figure or formula fragment)"；>15 条由 `_format_issues` 自然折叠。只读不写
   - **轴标签误标（v2）**：`^#{1,6}\s*\S{1,12}/(元|秒|米|千克|个|件|%|kg|cm|mm|m|s)$` → "possible axis label mis-tagged as heading"（B196 `## 利润值/元`）
+  - **image 占位符（v2.1.0）**：`<!--\s*image\s*-->` → "image placeholder (converter did not extract images) — extract from PDF or re-convert with an image-producing API"（MoE稀疏门控 4 处——不再被误读为"孤儿 caption"）
 
 ### 4.8 url_join（同行断 URL 接合）
 
@@ -219,6 +241,15 @@ MinerU 偶发把 URL 断成"URL + 空格 + 续段"（Agent World：`arxiv.org/ab
 - **fix（同行才接）**：`url` 段以 `/`、`.`、`-` 结尾，且紧随的 `text` 段以 ` +<tok>` 开头；`<tok>` 全为 URL 字符集（`[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]`）、含 ≥1 个 `[0-9./-]`、不含 CJK → 合并为完整 URL。其余不动。
 - **detect（跨行只报）**：URL 段后随 text 段以 `\n +<url-charset tok>` 开头 → "possible URL split across lines — review"（交 Agent 判断续段是否属于 URL）。
 - code 区内 URL 天然不受影响（code_block 是保护区）。
+
+### 4.9 fffd_restore（U+FFFD 从 content_list JSON 恢复，v2.1.0）
+
+MinerU 输出目录带 `content_list_v2.json`（md 的文本源头）；md 里的 `�`（U+FFFD）有时能在 JSON 片段里找回原字符。本 fixer **file_based**、`default_on=True` 但无 `--content-list` 时 no-op（默认流水线零影响）；执行序在**最前**（§2.4：ocr_cleanup 合并空格后会破坏对齐，必须在任何文本修复器之前跑，postprocess 开头特殊处理：先重写文件再读文本继续）。
+
+- **片段提取**：兼容平铺 list（B007）与分页 list[list]（ZEDA）两种结构；遍历各 item 的 `content.paragraph_content`/`title_content`，text 与 equation_inline 的 `content` 字段**按段落拼接**为一条片段。
+- **骨架唯一对齐（绝不臆造）**：对每行含 `�` 的 md 行，生成骨架（去掉 `�`、规范化空白）；在 JSON 片段中找骨架**唯一**匹配——片段去空白后与骨架一致（整条片段必须被行耗尽），且每个 `�` 对应片段中一段**唯一**的连续非 `�` 字符（gap，≤12 字符）可回填。同一片段内多种 gap 切分或 ≥2 个片段候选 → 保留 `�`。对齐用带 memo 的 DP 计数（cap=2 提前退出；递归深度有界 = 行长度）。
+- **detect**：无 `--content-list` 且 md 含 `�` → 一条提示 "N line(s) contain U+FFFD … pass --content-list PATH"；有 JSON 时由 postprocess 报残留未对齐行（"X U+FFFD line(s) could not be aligned … restore manually"）。
+- **实测边界**（ZEDA，flash 实测）：md 与 JSON 的 `�` 同位丢失（JSON 是 md 源头），唯一对齐全部 no-op，机械还原率 **0/85**——反馈声称"85 处全可还原"不实（人工修复版靠 PDF 语义知识补 `$N$`/`$h$` 等）。还原率以实测为准写入回归报告；算法对"JSON 完好、md 后损"的文档仍有效（合成 fixture 全过）。
 
 ## 5. 缺陷画像（实证）与修复归属
 
@@ -256,6 +287,16 @@ MinerU 偶发把 URL 断成"URL + 空格 + 续段"（Agent World：`arxiv.org/ab
 | 图注编号乱序 | ⚠️ | images(detect) → Agent 视觉核对 |
 | 图包含未引用图（公式碎片图） | ⚠️ | images(detect) → Agent |
 | 轴标签误标为标题（`## 利润值/元`) | ⚠️ | images(detect) → Agent |
+| 图片路径含括号被截断（`(flash实测)` 目录） | ❌ missing-image 误报 | images（正则容忍一层嵌套括号） |
+| 跨行 `0<\theta … r>0` 被拼成 html zone 吞公式 | ❌ 公式消失 | base（html zone 须字母/`!` 开头且单行） |
+| `\[...\]` 显示公式（Obsidian 剥反斜杠） | ❌ 公式不渲染 | math_delim → `$$...$$` |
+| `36%\~41%` 数字区间 | ❌ `\~` 异常 | math_delim（text 段数字/百分号语境 → `~`） |
+| U+FFFD 且同目录有 content_list_v2.json | ❌ 字符缺失 | fffd_restore（骨架唯一对齐；无 JSON 时 detect 提示） |
+| 合并单元格表（rowspan/colspan） | ❌ HTML 不渲染（表内 `$...$` 更看不到） | table(detect) → Agent 三档；或 `--flatten-merged-tables` 草稿展平 |
+| `<!-- image -->` 占位符 | ❌ 无图 | images(detect) → 引导重转 |
+| 正文错形（`wtih`/`drouput`/`trillionparameter`） | ⚠️ 拼写错 | ocr_cleanup(detect，错形小词典) → Agent |
+| 标识符被拆开（`k t h \_ excluding`） | ⚠️ 语义错 | ocr_cleanup(detect 聚合提示) → Agent |
+| ipynb JSON 行倾倒进正文 | ❌ 内容不可读 | code_fence(detect) → 转换层重建 |
 
 ## 6. SKILL.md 设计
 
@@ -436,3 +477,29 @@ v1.3.0 的"图在第一个标题前"检测方向正确（K3 样本实测命中�
 ### D7 发布形态与工作流（用户拍板）
 
 单版本一次发布：功能分支 `feat/v2.0.0-deep-adaptation` 上按阶段分批 commit，不碰 main、不打 tag、不推送；主对话 review 通过后合并 main、plugin.json version ↔ tag ↔ GitHub Release 三者对齐。
+
+## 15. v2.1.0 决策记录
+
+> 本版修复 4 份新实测反馈（3 篇 MoE/LLM 论文 + 2 份 2021 国赛扫描版）暴露的缺陷，并把本机 skills 副本上两处未经 review 的增量加固后正式入库。执行计划见 `docs/superpowers/plans/2026-08-04-v2.1.0-implementation.md`。
+
+### D8 本地增量 review：采纳 + 加固
+
+本机 `~/.claude/skills/obsidian-md-fixer` 被另一 agent 改过两处（无测试）：
+1. **`\[...\]` 显示公式转换**（`math_delim`）：T1 样本 24 处实证 Obsidian 按 CommonMark 剥掉 `\[` 反斜杠后 MathJax 看不到公式。**采纳**，补 `detect` 残留报出与全套测试；再加固：完整配对才转、`detect` 只报 fix 处理不了的残留（完整配对不报）。
+2. **html zone 单行化**（`base.py` 的 `<[^>]+>` → `<[^>\n]+>`）：方向对（防跨行误吞）但**不够**——同行 `0<\theta<1 and r>0` 仍会被拼成伪 tag。**加固入库**：`</?[a-zA-Z!][^>\n]*>`（tag 必须字母或 `!` 开头且单行），training-04 现场 5 段被吞公式重见天日。
+
+### D9 括号路径三连环根因
+
+`(flash实测)` 目录名致图片引用在 `)` 处截断：①zone 正则 image/link 路径部分 `[^)]*` → 容忍一层嵌套括号 `(?:[^()]|\([^()]*\))*`；②`images.py` 的 `_MD_IMAGE_RE` 同修；③organize 引用重写为相对 POSIX 路径。症状链：missing-image 误报 21 条 → 图包审计目录被污染 → 19 张孤儿代码截图漏报，一次根除。
+
+### D10 展平 opt-in 的平衡（MoE 保守 vs 2021B 半成品）
+
+合并单元格表（rowspan/colspan）是 Markdown 结构外的事。MoE稀疏门控 实测警告 MinerU 的 rowspan 数据本身可能错位；2021B 的三线表又多到 Agent 手修不可持续。交点：`table_flatten` **opt-in**（`--flatten-merged-tables`）+ 每个展平表上方标记行 + detect 逐表"verify against PDF"——草稿可用，绝不冒充成品。fixture 用 B007 表8 / B026 表11 真实结构，期望输出人工核对后写死入库。
+
+### D11 U+FFFD JSON 恢复的设计边界（唯一对齐，绝不臆造）
+
+反馈声称"ZEDA 85 处 U+FFFD 全可还原"——实测不实：md 与 content_list_v2.json 的 `�` 同位丢失（JSON 是 md 的源头），骨架唯一对齐全部 no-op，机械还原率 0/85；人工修复版靠 PDF 语义知识补 `$N$`/`$h$` 等。设计边界钉死：**只有唯一对齐才回填**（片段整体耗尽 + 每个 `�` 唯一 gap），零匹配或 ≥2 候选一律保留 `�` 并报残留。算法对"JSON 完好、md 后损"的文档（合成 fixture）有效，实测率以回归报告为准——不与反馈数字对齐，只与数据对齐。
+
+### D12 词典扩编与豁免（连字词典大写变体）
+
+`efects`（DESI 20 处）/`eects` 入库；词典条目允许首字母大写匹配（`Eficient→Efficient`，ZEDA 24 处）并保留匹配形态；**专名风险条目豁免大写**：`ofer` 仅小写匹配（人名 Ofer 保护）。规则：连字词典可证"原词形绝不合法"才收（D4 总则的封闭集合）；错形小词典（`wtih` 等）只 detect 不改——修复是语义判断，归 Agent。

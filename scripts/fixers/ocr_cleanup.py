@@ -102,8 +102,8 @@ def _fix_text_zone(seg: str) -> str:
     for ent, ch in _HTML_ENTITIES.items():
         seg = seg.replace(ent, ch)
     seg = _fix_braces(seg)  # whitelisted letter-spaces can appear inline
-    # ligature misses: lowercase word-boundary only (Dificult untouched)
-    seg = _LIGATURE_RE.sub(lambda m: _LIGATURE_DICT[m.group(1)], seg)
+    # ligature misses: word-boundary, lowercase + capitalized variants (Ofer exempt)
+    seg = _LIGATURE_RE.sub(_ligature_rep, seg)
     return seg
 
 
@@ -124,11 +124,33 @@ _TUPLE_SUBSCRIPT_RE = re.compile(r"[\^_]\{ *\d+( +\d+)+\}")
 _FFFD_RE = re.compile(r"�")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
+# 正文错形小词典 (detect-only,封闭小表):每条的"好"形是样本/计划中出现的
+# 真实原文。只报不改——修复需语义判断。人名/专名不收(Rafel/Jefrey 归 Agent)。
+# 出处:MoE稀疏门控(flash实测) 3 处各;sof tmax/dropP rob 计划指定(样本未复现)。
+_WORD_FORM_DICT = {
+    "sof tmax": "softmax",
+    "wtih": "with",
+    "drouput": "dropout",
+    "dropP rob": "DropProb",
+    "trillionparameter": "trillion parameter",
+    "multiply-andadds": "multiply-and-adds",
+}
+
+# 3-4 字母 run 与 ≥5 字母标识符仅隔 \_/_/空白:同一个标识符被 OCR 拆开
+# (MoE 实证:k t h \_ e x c l u d i n g -> kth_excluding)。
+_IDENT_ADJACENT_RE = re.compile(
+    r"(?:\\_|_|\s)+"
+    r"([A-Za-z]{5,}|[A-Za-z](?:\s+[A-Za-z]){4,})"
+)
+_SPACE_ONLY_RE = re.compile(r"\s+")
+
 # Closed ligature-miss dictionary: forms where a lost "ff" produces a spelling
 # that is NEVER a valid English word (class-A: auto-fix is safe). Every entry
 # is a misspelling of one word only; anything that could be a real word is
 # excluded (e.g. "of" was considered and rejected). Annotated with the sample
 # document the form was observed in. Do not grow this list with guesses.
+# Capitalized variants match too (Eficient -> Efficient, ZEDA 24 处), except
+# entries in _LIGATURE_EXEMPT_CAPS which may be proper names (ofer -> Ofer).
 _LIGATURE_DICT = {
     "dificult": "difficult",
     "dificulty": "difficulty",
@@ -137,6 +159,8 @@ _LIGATURE_DICT = {
     "efective": "effective",
     "efectively": "effectively",
     "efectiveness": "effectiveness",
+    "efects": "effects",  # DESI DR2 (flash实测): "selection efects" 20 处
+    "eects": "effects",  # eect 同族复数 (efect/eect 已有条目)
     "eficiency": "efficiency",
     "eficient": "efficient",
     "ofline": "offline",
@@ -153,9 +177,27 @@ _LIGATURE_DICT = {
     "conguration": "configuration",
     "proling": "profiling",
 }
-_LIGATURE_RE = re.compile(
-    r"\b(" + "|".join(re.escape(w) for w in _LIGATURE_DICT) + r")\b"
-)
+_LIGATURE_EXEMPT_CAPS = {"ofer"}  # 人名 Ofer 不得被大写变体规则误改
+
+
+def _ligature_pattern() -> str:
+    alts = []
+    for w in sorted(_LIGATURE_DICT, key=len, reverse=True):
+        alts.append(re.escape(w))
+        if w not in _LIGATURE_EXEMPT_CAPS:
+            alts.append(re.escape(w.capitalize()))
+    return "|".join(alts)
+
+
+_LIGATURE_RE = re.compile(r"\b(" + _ligature_pattern() + r")\b")
+
+
+def _ligature_rep(match: re.Match) -> str:
+    word = match.group(1)
+    fixed = _LIGATURE_DICT[word.lower()]
+    if word[0].isupper():
+        fixed = fixed[0].upper() + fixed[1:]
+    return fixed
 
 
 def detect(text: str) -> list:
@@ -177,11 +219,35 @@ def detect(text: str) -> list:
             no_array = _ARRAY_DECL_RE.sub(lambda m: " " * len(m.group(0)), seg)
             for m in _LETTER_RUN_DETECT_RE.finditer(no_array):
                 if 2 <= m.group(0).count(" ") <= 3:  # exactly 3-4 letters
+                    line = base_line + seg[: m.start()].count("\n")
                     problems.append(Issue(
                         "ocr_cleanup",
-                        base_line + seg[: m.start()].count("\n"),
+                        line,
                         "letter-run in math (possible split word) — review",
                     ))
+                    # 相邻 ≥5 字母标识符:是同一标识符被拆开(k t h \_ excluding)
+                    im = _IDENT_ADJACENT_RE.match(seg[m.end():])
+                    if im:
+                        ident = _SPACE_ONLY_RE.sub("", im.group(1))
+                        problems.append(Issue(
+                            "ocr_cleanup",
+                            line,
+                            f"possible same identifier: '{m.group(0)}' + "
+                            f"'{ident}' (review)",
+                        ))
+        if kind == "text":
+            for bad, good in _WORD_FORM_DICT.items():
+                start = 0
+                while True:
+                    i = seg.find(bad, start)
+                    if i < 0:
+                        break
+                    problems.append(Issue(
+                        "ocr_cleanup",
+                        base_line + seg[:i].count("\n"),
+                        f"suspicious word form: '{bad}' — maybe '{good}' (review)",
+                    ))
+                    start = i + len(bad)
         if kind in ("text", "math"):
             fffd_lines.update(
                 base_line + seg[: m.start()].count("\n") for m in _FFFD_RE.finditer(seg)
