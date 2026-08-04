@@ -145,6 +145,13 @@ def test_garbled_still_reported_for_true_garbled():
     assert len(hits) == 1
 
 
+def test_garbled_ignores_spaced_subsup_braces():
+    # MinerU 原始输出是 _ { i = 1 }(^/_ 与 { 之间有空格),直接 --verify 未规范化
+    # 文件时也应豁免下标内的 "="——检测不依赖 ocr_cleanup 先跑。
+    problems = detect("$$\ny _ { H } = \\sum _ { i = 1 } ^ { n } G ( x )\n$$")
+    assert not any("garbled" in p.message for p in problems)
+
+
 # --- 数字区间 \~ -> ~(2021B:36%\~41% 实样)---
 
 def test_tilde_number_range_percent_fixed():

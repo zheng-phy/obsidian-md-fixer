@@ -57,7 +57,9 @@ _DOWNGRADED_LT_RE = re.compile(r"\d<[A-Za-z](?:<[0-9])?")
 
 # Sub/superscript braces (_{i = 1}) legitimately contain "="; strip them
 # before counting so only body-level equals count (MoE稀疏门控 6 条误报).
-_SUBSUP_BRACED_RE = re.compile(r"[\^_]\{[^{}]*\}")
+# Allow spaces around the brace (_ { i = 1 }) — MinerU's raw output is not
+# normalized, so the detect must not depend on ocr_cleanup running first.
+_SUBSUP_BRACED_RE = re.compile(r"[\^_]\s*\{[^{}]*\}")
 
 
 def _bare_eq_count(seg: str) -> int:
