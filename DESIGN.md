@@ -409,10 +409,10 @@ python -m scripts.fixers.table paper.md
 
 ### 12.1 plugin marketplace（主要分发方式）
 
-仓库含 `.claude-plugin/plugin.json`（名称/version/作者）与 `.claude-plugin/marketplace.json`，使本仓库可被 Claude Code 作为 marketplace 安装。用户：
+仓库含 `.claude-plugin/plugin.json`（名称/version/作者）与 `.claude-plugin/marketplace.json`，使本仓库可被 Claude Code 作为 marketplace 安装。注意：`/plugin install` 的 `@` 后必须跟 **marketplace.json 的 `name`**（本仓库为 `obsidian-md-fixer`），不是 GitHub 用户名——README 曾误写 `@zheng-phy` 导致 "Marketplace not found"（Mac 实测）。用户：
 ```
 /plugin marketplace add zheng-phy/obsidian-md-fixer   # 一次性
-/plugin install obsidian-md-fixer@zheng-phy           # 安装
+/plugin install obsidian-md-fixer@obsidian-md-fixer   # 安装(@ 后 = marketplace.json 的 name)
 # 之后点"更新"即可拉新版,无需 clone
 ```
 

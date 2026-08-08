@@ -33,8 +33,8 @@
 # 一次性:把本仓库加为 marketplace
 /plugin marketplace add zheng-phy/obsidian-md-fixer
 
-# 安装
-/plugin install obsidian-md-fixer@zheng-phy
+# 安装(@ 后是 marketplace 名,即 marketplace.json 的 name,不是 GitHub 用户名)
+/plugin install obsidian-md-fixer@obsidian-md-fixer
 
 # 以后有新版本,在 skills 管理中点"更新"即可
 ```
