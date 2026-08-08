@@ -416,6 +416,8 @@ python -m scripts.fixers.table paper.md
 # 之后点"更新"即可拉新版,无需 clone
 ```
 
+**两条分发路径并存（README 已分类引导）**:plugin marketplace 装进 Claude Code 的 **plugin 目录**，适合单 agent 用户、可点"更新"；**多 agent 用户**（同时用 Codex/opencode/Gemini）推荐用 CC-Switch 添加本仓库链接——它读取并同步各 agent 的 skills 目录（`~/.claude/skills`、`~/.codex/skills`、`~/.opencode/…`)，统一管理。两路径互不相通：plugin 目录不在 CC-Switch 读取的 `~/.claude/skills` 内，故 plugin 安装的 skill 不出现在 CC-Switch 管理面板；混用会产生两份同名 skill，应引导用户二选一。
+
 ### 12.2 版本与 Release 流程
 
 每次迭代：

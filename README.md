@@ -25,6 +25,8 @@
 
 ## 安装与更新
 
+> **选哪种？** 只用 Claude Code 一个 agent → 方式一（plugin，一键安装/更新）。同时用 Codex / opencode / Gemini 等多个 agent → 方式三（CC-Switch，一处管理、同步到多个 agent)。方式二是手动操作（方式三的底层原理）。
+
 ### 方式一：Claude Code plugin（推荐，一键安装/更新）
 
 通过 plugin marketplace，无需 clone 仓库：
@@ -54,6 +56,12 @@ cd ~/.claude/skills/obsidian-md-fixer && git pull
 # 3. (可选)安装 Python 依赖——仅跑测试需要;运行修复器零依赖
 pip install -r requirements.txt
 ```
+
+### 方式三：CC-Switch（多 agent 统一管理）
+
+如果你同时用 Claude Code、Codex、opencode、Gemini 等多个 AI CLI,推荐用 [CC-Switch](https://github.com/farion1231/cc-switch) 统一管理 skills——在它的 skill 管理里**添加本仓库链接**，即可一键安装并同步到各 agent 的 skills 目录（`~/.claude/skills`、`~/.codex/skills`、`~/.opencode/…` 等），更新也在一处完成。
+
+> 注意：方式一（plugin marketplace）装进的是 Claude Code 的 plugin 目录，**不在** CC-Switch 读取的 `~/.claude/skills` 里，所以 plugin 安装的 skill 不会出现在 CC-Switch 的 skill 管理中——多 agent 用户请走方式三，别两种方式混用（会产生两份同名 skill)。
 
 ## 使用
 
